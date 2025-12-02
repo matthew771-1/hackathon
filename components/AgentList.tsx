@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { AIAgent } from "@/types/dao";
 import { AgentInitializer } from "./AgentInitializer";
-import { useAgentService } from "@/hooks/useAgentService";
+import { useAgentServiceContext } from "@/contexts/AgentServiceContext";
 import { AgentEditor } from "./AgentEditor";
 import { DelegationModal } from "./DelegationModal";
 
@@ -14,10 +14,11 @@ export function AgentList({
   agents: AIAgent[];
   onAgentUpdate?: (updatedAgent: AIAgent) => void;
 }) {
-  const agentService = useAgentService();
+  const agentService = useAgentServiceContext();
   const [initializingAgent, setInitializingAgent] = useState<string | null>(null);
   const [editingAgent, setEditingAgent] = useState<AIAgent | null>(null);
   const [delegatingAgent, setDelegatingAgent] = useState<AIAgent | null>(null);
+  const [initSuccess, setInitSuccess] = useState<string | null>(null);
   if (agents.length === 0) {
     return (
       <div className="p-6 border rounded-lg bg-white dark:bg-gray-800 text-center">
@@ -78,13 +79,21 @@ export function AgentList({
                 </div>
               )}
             </div>
+            {initSuccess && (
+              <div className="mt-2 p-3 bg-green-50 dark:bg-green-900/20 border border-green-500 rounded-lg">
+                <p className="text-sm text-green-800 dark:text-green-300">{initSuccess}</p>
+              </div>
+            )}
             <div className="mt-4 space-y-2">
               {initializingAgent === agent.id ? (
                 <AgentInitializer
                   agent={agent}
-                  onInitialized={(success) => {
+                  onInitialized={(success, maskedKey) => {
                     if (success) {
+                      setInitSuccess(`Agent initialized successfully! API Key: ${maskedKey}`);
                       setInitializingAgent(null);
+                      // Clear success message after 5 seconds
+                      setTimeout(() => setInitSuccess(null), 5000);
                     }
                   }}
                 />

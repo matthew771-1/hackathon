@@ -6,6 +6,7 @@ import { X } from "lucide-react";
 import { POPULAR_SOLANA_DAOS } from "@/lib/realms";
 import { delegateToAgent } from "@/lib/governance";
 import { PublicKey } from "@solana/web3.js";
+import { AgentActivity } from "./AgentActivity";
 
 export function DelegationModal({
   agent,
@@ -17,6 +18,7 @@ export function DelegationModal({
   const [selectedDAO, setSelectedDAO] = useState<string>("");
   const [isDelegating, setIsDelegating] = useState(false);
   const [delegationStatus, setDelegationStatus] = useState<string | null>(null);
+  const [isDelegated, setIsDelegated] = useState(false);
 
   const handleDelegate = async () => {
     if (!selectedDAO) {
@@ -39,6 +41,7 @@ export function DelegationModal({
       );
 
       setDelegationStatus(`Delegation successful! Transaction: ${signature.slice(0, 8)}...`);
+      setIsDelegated(true);
     } catch (error) {
       console.error("Delegation error:", error);
       setDelegationStatus("Delegation failed. Please try again.");
@@ -104,21 +107,40 @@ export function DelegationModal({
             </div>
           )}
 
-          <div className="flex gap-3 pt-4">
-            <button
-              onClick={handleDelegate}
-              disabled={isDelegating || !selectedDAO}
-              className="flex-1 px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isDelegating ? "Delegating..." : "Delegate Governance Power"}
-            </button>
-            <button
-              onClick={onClose}
-              className="px-6 py-3 border rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
+          {isDelegated && selectedDAO && (
+            <div className="mt-4">
+              <AgentActivity agent={agent} daoAddress={selectedDAO} />
+            </div>
+          )}
+
+          {!isDelegated && (
+            <div className="flex gap-3 pt-4">
+              <button
+                onClick={handleDelegate}
+                disabled={isDelegating || !selectedDAO}
+                className="flex-1 px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isDelegating ? "Delegating..." : "Delegate Governance Power"}
+              </button>
+              <button
+                onClick={onClose}
+                className="px-6 py-3 border rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+
+          {isDelegated && (
+            <div className="flex gap-3 pt-4">
+              <button
+                onClick={onClose}
+                className="flex-1 px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

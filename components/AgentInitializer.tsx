@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { AIAgent } from "@/types/dao";
-import { useAgentService } from "@/hooks/useAgentService";
+import { useAgentServiceContext } from "@/contexts/AgentServiceContext";
 import { rpc } from "@/lib/realms";
 
 export function AgentInitializer({
@@ -10,12 +10,12 @@ export function AgentInitializer({
   onInitialized,
 }: {
   agent: AIAgent;
-  onInitialized: (success: boolean) => void;
+  onInitialized: (success: boolean, maskedKey?: string) => void;
 }) {
   const [openAIApiKey, setOpenAIApiKey] = useState("");
   const [isInitializing, setIsInitializing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const agentService = useAgentService();
+  const agentService = useAgentServiceContext();
 
   const handleInitialize = async () => {
     if (!openAIApiKey.trim()) {
@@ -35,7 +35,11 @@ export function AgentInitializer({
       );
 
       if (solanaAgent) {
-        onInitialized(true);
+        // Mask API key for display
+        const maskedKey = openAIApiKey.length > 11
+          ? `${openAIApiKey.slice(0, 7)}...${openAIApiKey.slice(-4)}`
+          : `${openAIApiKey.slice(0, 3)}...`;
+        onInitialized(true, maskedKey);
       } else {
         setError("Failed to initialize agent. Please check your API key.");
         onInitialized(false);

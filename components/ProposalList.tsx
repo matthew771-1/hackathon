@@ -3,17 +3,19 @@
 import { useState, useEffect } from "react";
 import { ProposalCard } from "./ProposalCard";
 import type { Proposal, AIAgent } from "@/types/dao";
-import { useAgentService } from "@/hooks/useAgentService";
+import { useAgentServiceContext } from "@/contexts/AgentServiceContext";
+import type { Activity } from "./AgentActivity";
 
 export function ProposalList({
   daoAddress,
   agent,
-  agentService,
+  onActivityUpdate,
 }: {
   daoAddress: string;
   agent?: AIAgent;
-  agentService?: ReturnType<typeof useAgentService>;
+  onActivityUpdate?: (activity: Activity) => void;
 }) {
+  const agentService = useAgentServiceContext();
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [loading, setLoading] = useState(true);
   const [analyses, setAnalyses] = useState<Record<string, any>>({});
@@ -39,13 +41,34 @@ export function ProposalList({
   }, [daoAddress]);
 
   const handleAnalyze = async (proposal: Proposal, agent: AIAgent) => {
-    if (!agentService || !agentService.isInitialized) {
-      console.error("Agent service not initialized");
-      alert("Please initialize the AI agent first. OpenAI API key required.");
+    if (!agentService) {
+      console.error("Agent service not available");
+      alert("Agent service not available. Please refresh the page.");
+      return;
+    }
+
+    const agentInstance = agentService.getAgent(agent.id);
+    if (!agentInstance) {
+      console.error("Agent not initialized");
+      alert("Please initialize the AI agent first. Click 'Initialize AI Agent' and enter your OpenAI API key.");
       return;
     }
 
     setAnalyzingId(proposal.id);
+    
+    // Add analyzing activity
+    if (onActivityUpdate) {
+      onActivityUpdate({
+        id: `analyzing-${proposal.id}`,
+        type: "analyzing",
+        proposalId: proposal.id,
+        proposalTitle: proposal.title,
+        timestamp: new Date(),
+        status: "in_progress",
+        message: `Analyzing proposal: "${proposal.title}"...`,
+      });
+    }
+
     try {
       // Use the agent service to analyze the proposal
       const analysis = await agentService.analyzeProposalWithAgent(
@@ -59,9 +82,36 @@ export function ProposalList({
           ...prev,
           [proposal.id]: analysis,
         }));
+
+        // Add completed activity
+        if (onActivityUpdate) {
+          onActivityUpdate({
+            id: `completed-${proposal.id}`,
+            type: "completed",
+            proposalId: proposal.id,
+            proposalTitle: proposal.title,
+            timestamp: new Date(),
+            status: "completed",
+            message: `Analysis complete: ${analysis.recommendation.toUpperCase()} vote (${analysis.confidence}% confidence)`,
+          });
+        }
       }
     } catch (error) {
       console.error("Error analyzing proposal:", error);
+      
+      // Add failed activity
+      if (onActivityUpdate) {
+        onActivityUpdate({
+          id: `failed-${proposal.id}`,
+          type: "analyzing",
+          proposalId: proposal.id,
+          proposalTitle: proposal.title,
+          timestamp: new Date(),
+          status: "failed",
+          message: `Failed to analyze proposal: "${proposal.title}"`,
+        });
+      }
+      
       alert("Error analyzing proposal. Please check your OpenAI API key.");
     } finally {
       setAnalyzingId(null);

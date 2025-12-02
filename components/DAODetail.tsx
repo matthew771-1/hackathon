@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { ProposalList } from "./ProposalList";
 import type { DAO, AIAgent } from "@/types/dao";
-import { useAgentService } from "@/hooks/useAgentService";
+import { useAgentServiceContext } from "@/contexts/AgentServiceContext";
+import { AgentActivity } from "./AgentActivity";
 import { X } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 
@@ -19,7 +20,8 @@ export function DAODetail({
   const [selectedAgent, setSelectedAgent] = useState<AIAgent | undefined>(
     agents.length > 0 ? agents[0] : undefined
   );
-  const agentService = useAgentService();
+  const agentService = useAgentServiceContext();
+  const [agentActivities, setAgentActivities] = useState<any[]>([]);
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -85,12 +87,27 @@ export function DAODetail({
           </div>
         )}
 
+        {/* Agent Activity (if delegated) */}
+        {selectedAgent && (
+          <div className="p-6 border-b">
+            <AgentActivity 
+              agent={selectedAgent} 
+              daoAddress={dao.address}
+              onActivityUpdate={(activity) => {
+                setAgentActivities((prev) => [activity, ...prev].slice(0, 20));
+              }}
+            />
+          </div>
+        )}
+
         {/* Proposals */}
         <div className="p-6">
           <ProposalList
             daoAddress={dao.address}
             agent={selectedAgent}
-            agentService={agentService}
+            onActivityUpdate={(activity) => {
+              setAgentActivities((prev) => [activity, ...prev].slice(0, 20));
+            }}
           />
         </div>
       </div>
