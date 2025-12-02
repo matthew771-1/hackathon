@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import type { UiWallet } from "@wallet-standard/react";
-import { useConnect, useDisconnect, useWallets } from "@wallet-standard/react";
-import { StandardConnect } from "@wallet-standard/core";
+import { useState, useEffect, useRef } from "react";
+import Image from "next/image";
 import { PublicKey } from "@solana/web3.js";
+import { Wallet, ChevronDown } from "lucide-react";
+import { useWallets } from "@wallet-standard/react";
 
 interface WindowWallet {
   name: string;
@@ -14,17 +14,12 @@ interface WindowWallet {
 }
 
 export function WalletButton() {
-  const allWallets = useWallets();
+  const standardWallets = useWallets();
   const [windowWallets, setWindowWallets] = useState<WindowWallet[]>([]);
   const [connectedWindowWallet, setConnectedWindowWallet] = useState<WindowWallet | null>(null);
   const [windowPublicKey, setWindowPublicKey] = useState<PublicKey | null>(null);
-
-  // Filter Wallet Standard wallets to only those that support standard:connect
-  const standardWallets = allWallets.filter(
-    (wallet) =>
-      wallet.chains?.some((c) => c.startsWith("solana:")) &&
-      wallet.features.includes(StandardConnect)
-  );
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Detect window-injected wallets (Phantom, Solflare, Backpack)
   useEffect(() => {
@@ -34,15 +29,48 @@ export function WalletButton() {
 
     // Detect Phantom
     if (window.solana && (window.solana as any).isPhantom) {
+      // Use a reliable Phantom icon URL
+      const phantomIcon = "https://yt3.googleusercontent.com/0yNbMsS0-rUrtVJmKd6d0xTDmLDEn1qu_KkivaeIC3UmCuXntxE-CJZRhWoy93JXij1YSJFMhA=s900-c-k-c0x00ffffff-no-rj";
       detectedWallets.push({
         name: "Phantom",
-        icon: "https://phantom.app/img/logo.png",
+        icon: phantomIcon,
         provider: window.solana,
         connect: async () => {
           const response = await window.solana!.connect!();
           return { publicKey: new PublicKey(response.publicKey.toString()) };
         },
       });
+    }
+
+    // Detect Jupiter - check multiple possible locations
+    // Jupiter might be in window.jupiter, window.solana (if it's the active wallet), or via Wallet Standard
+    if ((window as any).jupiter) {
+      const jupiter = (window as any).jupiter;
+      detectedWallets.push({
+        name: "Jupiter",
+        icon: "https://jup.ag/favicon.ico",
+        provider: jupiter,
+        connect: async () => {
+          const response = await jupiter.connect();
+          return { publicKey: new PublicKey(response.publicKey.toString()) };
+        },
+      });
+    } else if (window.solana && !(window.solana as any).isPhantom) {
+      // Check if solana exists but isn't Phantom - might be Jupiter or another wallet
+      // Try to detect Jupiter by checking if it has Jupiter-specific properties
+      const solanaProvider = window.solana as any;
+      if (solanaProvider.name?.toLowerCase().includes('jupiter') || 
+          (window as any).__JUPITER_WALLET__) {
+        detectedWallets.push({
+          name: "Jupiter",
+          icon: "https://jup.ag/favicon.ico",
+          provider: solanaProvider,
+          connect: async () => {
+            const response = await solanaProvider.connect();
+            return { publicKey: new PublicKey(response.publicKey.toString()) };
+          },
+        });
+      }
     }
 
     // Detect Solflare
@@ -76,175 +104,199 @@ export function WalletButton() {
     setWindowWallets(detectedWallets);
   }, []);
 
-  const allWalletsAvailable = standardWallets.length > 0 || windowWallets.length > 0;
-
-  if (!allWalletsAvailable) {
-    return (
-      <div className="p-4 border rounded-lg bg-yellow-50 dark:bg-yellow-900/20">
-        <p>No wallets detected. Please install a Solana wallet extension like Phantom or Backpack.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      <h2 className="text-2xl font-semibold mb-4">Connect Wallet</h2>
-      <div className="grid gap-4 md:grid-cols-2">
-        {/* Window wallets (Phantom, Solflare, Backpack) */}
-        {windowWallets.map((wallet, index) => (
-          <WindowWalletItem
-            key={`window-${wallet.name}-${index}`}
-            wallet={wallet}
-            isConnected={connectedWindowWallet?.name === wallet.name && windowPublicKey !== null}
-            publicKey={connectedWindowWallet?.name === wallet.name ? windowPublicKey : null}
-            onConnect={async () => {
-              try {
-                const { publicKey } = await wallet.connect();
-                setConnectedWindowWallet(wallet);
-                setWindowPublicKey(publicKey);
-              } catch (error) {
-                console.error("Failed to connect:", error);
-                alert("Failed to connect wallet. Please try again.");
-              }
-            }}
-            onDisconnect={async () => {
-              try {
-                if (wallet.provider?.disconnect) {
-                  await wallet.provider.disconnect();
-                }
-                setConnectedWindowWallet(null);
-                setWindowPublicKey(null);
-              } catch (error) {
-                console.error("Failed to disconnect:", error);
-              }
-            }}
-          />
-        ))}
-        {/* Standard wallets */}
-        {standardWallets.map((wallet, index) => (
-          <StandardWalletItem
-            key={`standard-${wallet.name}-${index}`}
-            wallet={wallet}
-          />
-        ))}
-      </div>
-    </div>
+  // Check for Jupiter in Wallet Standard wallets
+  const jupiterStandardWallet = standardWallets.find(
+    (w) => w.name.toLowerCase().includes("jupiter")
   );
-}
 
-function StandardWalletItem({ wallet }: { wallet: UiWallet }) {
-  // Always call hooks unconditionally (React rules)
-  const supportsConnect = wallet.features.includes(StandardConnect);
-  // Only call useConnect if wallet supports it, otherwise use a dummy wallet
-  const [isConnecting, connect] = useConnect(supportsConnect ? wallet : (null as any));
-  const [isDisconnecting, disconnect] = useDisconnect(wallet);
-  const isConnected = wallet.accounts.length > 0;
-  const isPending = (isConnecting || isDisconnecting) && supportsConnect;
-
-  const handleClick = async () => {
-    if (isConnected) {
-      try {
-        if (disconnect) {
-          await disconnect();
+  // Always show Phantom and Jupiter, even if not detected
+  const phantomWallet = windowWallets.find(w => w.name === "Phantom");
+  const jupiterWindowWallet = windowWallets.find(w => w.name === "Jupiter");
+  
+  // Create Jupiter wallet from standard wallet if found
+  const jupiterWallet: WindowWallet = jupiterWindowWallet || (jupiterStandardWallet ? {
+    name: "Jupiter",
+    icon: (jupiterStandardWallet as any).icon || "https://jup.ag/favicon.ico",
+    provider: jupiterStandardWallet,
+    connect: async () => {
+      // Use Wallet Standard connect
+      const connectFeature = (jupiterStandardWallet as any).features?.["standard:connect"];
+      if (connectFeature && typeof connectFeature.connect === "function") {
+        await connectFeature.connect();
+        // Wait a moment for accounts to update, then check
+        await new Promise(resolve => setTimeout(resolve, 200));
+        // Check accounts again after connection
+        if (jupiterStandardWallet.accounts && jupiterStandardWallet.accounts.length > 0) {
+          return { publicKey: new PublicKey(jupiterStandardWallet.accounts[0].address) };
         }
-      } catch (error) {
-        console.error("Failed to disconnect:", error);
-      }
-    } else {
-      try {
-        if (connect) {
-          await connect();
-        } else {
-          // Fallback: try to use the wallet's connect feature directly
-          const walletAny = wallet as any;
-          const connectFeature = walletAny.features?.["standard:connect"];
-          if (connectFeature && typeof connectFeature.connect === "function") {
-            await connectFeature.connect();
-          } else {
-            alert("This wallet does not support the standard connect feature.");
-          }
+        // If still no accounts, try to get from the provider directly
+        const provider = (jupiterStandardWallet as any).provider;
+        if (provider && provider.publicKey) {
+          return { publicKey: new PublicKey(provider.publicKey.toString()) };
         }
-      } catch (error) {
-        console.error("Failed to connect:", error);
-        alert("Failed to connect wallet. Please try again.");
       }
-    }
-  };
+      throw new Error("Failed to connect Jupiter wallet");
+    },
+  } : {
+    name: "Jupiter",
+    icon: "https://jup.ag/favicon.ico",
+    provider: null,
+    connect: async () => {
+      throw new Error("Jupiter wallet not detected. Please install the Jupiter extension.");
+    },
+  });
+  
+  // Create default wallets if not detected
+  const availableWallets: WindowWallet[] = [
+    phantomWallet || {
+      name: "Phantom",
+      icon: "https://yt3.googleusercontent.com/0yNbMsS0-rUrtVJmKd6d0xTDmLDEn1qu_KkivaeIC3UmCuXntxE-CJZRhWoy93JXij1YSJFMhA=s900-c-k-c0x00ffffff-no-rj",
+      provider: null,
+      connect: async () => {
+        throw new Error("Phantom wallet not detected. Please install the Phantom extension.");
+      },
+    },
+    jupiterWallet,
+  ];
 
-  return (
-    <button
-      onClick={handleClick}
-      disabled={isPending || !supportsConnect}
-      className={`p-4 border rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-        isConnected
-          ? "bg-green-50 dark:bg-green-900/20 border-green-500"
-          : "hover:bg-gray-50 dark:hover:bg-gray-800"
-      }`}
-    >
-      <div className="font-semibold">{wallet.name}</div>
-      <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-        {isConnected
-          ? `${wallet.accounts.length} account${wallet.accounts.length !== 1 ? "s" : ""} connected`
-          : supportsConnect
-          ? "Click to connect"
-          : "Not supported"}
-      </div>
-      {isPending && <div className="text-xs mt-2 text-blue-600 dark:text-blue-400">Processing...</div>}
-    </button>
-  );
-}
-
-function WindowWalletItem({
-  wallet,
-  isConnected,
-  publicKey,
-  onConnect,
-  onDisconnect,
-}: {
-  wallet: WindowWallet;
-  isConnected: boolean;
-  publicKey: PublicKey | null;
-  onConnect: () => Promise<void>;
-  onDisconnect: () => Promise<void>;
-}) {
-  const [isPending, setIsPending] = useState(false);
-
-  const handleClick = async () => {
-    setIsPending(true);
-    try {
-      if (isConnected) {
-        await onDisconnect();
-      } else {
-        await onConnect();
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
       }
-    } finally {
-      setIsPending(false);
+    };
+
+    if (isOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
     }
-  };
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [isOpen]);
 
   const formatAddress = (address: string) => {
     if (!address) return "";
     return `${address.slice(0, 4)}...${address.slice(-4)}`;
   };
 
+  const handleWalletConnect = async (wallet: WindowWallet) => {
+    try {
+      if (!wallet.provider) {
+        alert(`${wallet.name} wallet not detected. Please install the ${wallet.name} extension.`);
+        return;
+      }
+      const { publicKey } = await wallet.connect();
+      setConnectedWindowWallet(wallet);
+      setWindowPublicKey(publicKey);
+      setIsOpen(false);
+    } catch (error) {
+      console.error("Failed to connect:", error);
+      const errorMessage = error instanceof Error ? error.message : "Failed to connect wallet. Please try again.";
+      alert(errorMessage);
+    }
+  };
+
+  const handleWalletDisconnect = async () => {
+    try {
+      if (connectedWindowWallet?.provider?.disconnect) {
+        await connectedWindowWallet.provider.disconnect();
+      }
+      setConnectedWindowWallet(null);
+      setWindowPublicKey(null);
+      setIsOpen(false);
+    } catch (error) {
+      console.error("Failed to disconnect:", error);
+    }
+  };
+
+  const isConnected = connectedWindowWallet !== null && windowPublicKey !== null;
+
   return (
-    <button
-      onClick={handleClick}
-      disabled={isPending}
-      className={`p-4 border rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-        isConnected
-          ? "bg-green-50 dark:bg-green-900/20 border-green-500"
-          : "hover:bg-gray-50 dark:hover:bg-gray-800"
-      }`}
-    >
-      <div className="font-semibold">{wallet.name}</div>
-      <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-        {isConnected && publicKey
-          ? `Connected (${formatAddress(publicKey.toString())})`
-          : "Click to connect"}
+    <>
+      {/* Main Button */}
+      <div className="relative" ref={dropdownRef}>
+        <button
+          onClick={() => setIsOpen(!isOpen)}
+          className="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-fuchsia-600 text-white rounded-lg font-semibold transition-all duration-300 flex items-center gap-2 shadow-lg shadow-purple-500/20 hover:scale-105 hover:from-purple-700 hover:to-fuchsia-700"
+        >
+          <Wallet className="w-4 h-4" />
+          <span className="hidden sm:inline">
+            {isConnected ? `Connected (${formatAddress(windowPublicKey!.toString())})` : "Connect Wallet"}
+          </span>
+          <span className="sm:hidden">
+            {isConnected ? "Connected" : "Connect"}
+          </span>
+          <ChevronDown className={`w-4 h-4 transition-transform duration-300 ${isOpen ? "rotate-180" : ""}`} />
+        </button>
+
+        {/* Dropdown Modal */}
+        {isOpen && (
+          <>
+            {/* Backdrop */}
+            <div 
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40"
+              onClick={() => setIsOpen(false)}
+            />
+            
+            {/* Wallet Options Modal */}
+            <div className="absolute top-full right-0 mt-2 w-80 bg-slate-900/50 backdrop-blur-sm border border-slate-800 rounded-xl shadow-2xl z-50 overflow-hidden">
+              <div className="p-4 space-y-3">
+                {availableWallets.length > 0 ? (
+                  availableWallets.map((wallet) => {
+                    const isWalletConnected = connectedWindowWallet?.name === wallet.name && windowPublicKey !== null;
+                    return (
+                      <button
+                        key={wallet.name}
+                        onClick={() => isWalletConnected ? handleWalletDisconnect() : handleWalletConnect(wallet)}
+                        disabled={!wallet.provider && !isWalletConnected}
+                        className={`w-full flex items-center gap-3 p-4 rounded-lg transition-all border ${
+                          isWalletConnected
+                            ? "bg-green-500/10 border-green-500/30 hover:bg-green-500/20 hover:border-green-500/50"
+                            : !wallet.provider
+                            ? "bg-slate-900/30 border-slate-800/50 opacity-60 cursor-not-allowed"
+                            : "bg-slate-900/50 border-slate-800 hover:bg-slate-800/50 hover:border-purple-500/50"
+                        }`}
+                      >
+                        {wallet.icon && (
+                          <div className="flex-shrink-0 w-12 h-12 rounded-lg overflow-hidden bg-slate-950 flex items-center justify-center border border-slate-800">
+                            <Image
+                              src={wallet.icon}
+                              alt={wallet.name}
+                              width={48}
+                              height={48}
+                              className="object-contain"
+                              unoptimized
+                            />
+                          </div>
+                        )}
+                        <div className="flex-1 text-left min-w-0">
+                          <div className="font-semibold text-white text-base">{wallet.name}</div>
+                          <div className="text-xs text-slate-400 mt-0.5">
+                            {isWalletConnected && windowPublicKey
+                              ? `Connected (${formatAddress(windowPublicKey.toString())})`
+                              : !wallet.provider
+                              ? "Not installed"
+                              : "Click to connect"}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })
+                ) : (
+                  <div className="p-4 text-center">
+                    <p className="text-sm text-slate-400">
+                      No wallets detected. Please install Phantom or Jupiter wallet extension.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
       </div>
-      {isPending && <div className="text-xs mt-2 text-blue-600 dark:text-blue-400">Processing...</div>}
-    </button>
+    </>
   );
 }
 

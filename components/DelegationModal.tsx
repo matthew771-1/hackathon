@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { AIAgent } from "@/types/dao";
-import { X } from "lucide-react";
+import { X, Send, Info } from "lucide-react";
 import { POPULAR_SOLANA_DAOS } from "@/lib/realms";
 import { delegateToAgent } from "@/lib/governance";
 import { PublicKey } from "@solana/web3.js";
@@ -51,43 +51,46 @@ export function DelegationModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-xl max-w-2xl w-full p-6">
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl max-w-2xl w-full p-6 shadow-2xl">
         <div className="flex justify-between items-center mb-6">
-          <h2 className="text-2xl font-bold">Delegate {agent.name}</h2>
+          <h2 className="text-2xl font-bold text-white">Delegate {agent.name}</h2>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+            className="p-2 hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-white"
           >
             <X className="w-6 h-6" />
           </button>
         </div>
 
-        <div className="space-y-4">
-          <p className="text-gray-600 dark:text-gray-400">
-            Delegate your governance voting power to <strong>{agent.name}</strong>. 
+        <div className="space-y-5">
+          <p className="text-slate-400">
+            Delegate your governance voting power to <strong className="text-white">{agent.name}</strong>. 
             The agent will be able to vote on proposals in the selected DAO on your behalf.
           </p>
 
           <div>
-            <label className="block text-sm font-medium mb-2">Select DAO</label>
+            <label className="block text-sm font-medium mb-2 text-slate-300">Select DAO</label>
             <select
               value={selectedDAO}
               onChange={(e) => setSelectedDAO(e.target.value)}
-              className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              className="w-full px-4 py-2.5 bg-slate-950/50 border border-slate-700 rounded-lg text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
             >
-              <option value="">Choose a DAO...</option>
+              <option value="" className="bg-slate-900">Choose a DAO...</option>
               {POPULAR_SOLANA_DAOS.map((dao) => (
-                <option key={dao.address} value={dao.address}>
+                <option key={dao.address} value={dao.address} className="bg-slate-900">
                   {dao.name}
                 </option>
               ))}
             </select>
           </div>
 
-          <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-            <h3 className="font-semibold mb-2">How Delegation Works</h3>
-            <ul className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
+          <div className="p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+            <h3 className="font-semibold mb-2 text-blue-400 flex items-center gap-2">
+              <Info className="w-4 h-4" />
+              How Delegation Works
+            </h3>
+            <ul className="text-sm text-slate-400 space-y-1">
             <li>• Your agent will analyze proposals automatically</li>
             <li>• Votes will be cast based on your agent&apos;s personality</li>
             <li>• You can revoke delegation at any time</li>
@@ -97,10 +100,10 @@ export function DelegationModal({
 
           {delegationStatus && (
             <div
-              className={`p-4 rounded-lg ${
+              className={`p-4 rounded-lg border ${
                 delegationStatus.includes("successful")
-                  ? "bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-300"
-                  : "bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-300"
+                  ? "bg-green-500/10 border-green-500/30 text-green-400"
+                  : "bg-red-500/10 border-red-500/30 text-red-400"
               }`}
             >
               {delegationStatus}
@@ -118,13 +121,14 @@ export function DelegationModal({
               <button
                 onClick={handleDelegate}
                 disabled={isDelegating || !selectedDAO}
-                className="flex-1 px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-1 px-6 py-3 bg-gradient-to-r from-purple-600 to-fuchsia-600 text-white rounded-lg hover:from-purple-700 hover:to-fuchsia-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-purple-500/20"
               >
+                <Send className="w-4 h-4" />
                 {isDelegating ? "Delegating..." : "Delegate Governance Power"}
               </button>
               <button
                 onClick={onClose}
-                className="px-6 py-3 border rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                className="px-6 py-3 border border-slate-700 rounded-lg hover:bg-slate-800 transition-colors text-slate-300"
               >
                 Cancel
               </button>
@@ -135,7 +139,7 @@ export function DelegationModal({
             <div className="flex gap-3 pt-4">
               <button
                 onClick={onClose}
-                className="flex-1 px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                className="flex-1 px-6 py-3 bg-gradient-to-r from-purple-600 to-fuchsia-600 text-white rounded-lg hover:from-purple-700 hover:to-fuchsia-700 transition-all shadow-lg shadow-purple-500/20"
               >
                 Close
               </button>
