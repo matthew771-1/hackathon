@@ -11,13 +11,17 @@
   "dependencies": {
     "@solana/kit": "^5.0.0",
     "@solana/react": "^5.0.0",
+    "@solana/spl-governance": "^0.3.28",
+    "@solana/spl-token": "^0.4.14",
     "@solana/web3.js": "^1.98.4",
     "@wallet-standard/core": "^1.1.1",
     "@wallet-standard/react": "^1.0.1",
     "@wallet-standard/react-core": "^1.0.1",
+    "lucide-react": "^0.555.0",
     "next": "^15.0.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "solana-agent-kit": "^2.0.10"
   },
   "devDependencies": {
     "@types/node": "^20",

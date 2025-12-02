@@ -133,12 +133,13 @@ export function WalletButton() {
 }
 
 function StandardWalletItem({ wallet }: { wallet: UiWallet }) {
-  // Only use useConnect if wallet supports standard:connect
+  // Always call hooks unconditionally (React rules)
   const supportsConnect = wallet.features.includes(StandardConnect);
-  const [isConnecting, connect] = supportsConnect ? useConnect(wallet) : [false, null];
+  // Only call useConnect if wallet supports it, otherwise use a dummy wallet
+  const [isConnecting, connect] = useConnect(supportsConnect ? wallet : (null as any));
   const [isDisconnecting, disconnect] = useDisconnect(wallet);
   const isConnected = wallet.accounts.length > 0;
-  const isPending = isConnecting || isDisconnecting;
+  const isPending = (isConnecting || isDisconnecting) && supportsConnect;
 
   const handleClick = async () => {
     if (isConnected) {
