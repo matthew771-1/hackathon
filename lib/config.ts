@@ -10,8 +10,9 @@ export const APP_CONFIG = {
       ws: process.env.NEXT_PUBLIC_SOLANA_WS || "wss://api.devnet.solana.com",
     },
     mainnet: {
-      rpc: "https://api.mainnet-beta.solana.com",
-      ws: "wss://api.mainnet-beta.solana.com",
+      // Read from environment variable (available at build time in Next.js)
+      rpc: (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_SOLANA_MAINNET_RPC) || "https://api.mainnet-beta.solana.com",
+      ws: (typeof process !== "undefined" && process.env?.NEXT_PUBLIC_SOLANA_MAINNET_WS) || "wss://api.mainnet-beta.solana.com",
     },
   },
 
@@ -22,44 +23,20 @@ export const APP_CONFIG = {
     // Popular Solana DAOs on Mainnet
     popularDAOs: [
       {
-        name: "Mango DAO",
-        address: "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7d4BLWLqK8HqR",
-        description: "Governs Mango Markets - decentralized trading platform for margin trading, lending, and perpetual futures",
+        name: "Adrena DAO",
+        address: "GWe1VYTRMujAtGVhSLwSn4YPsXBLe5qfkzNAYAKD44Nk",
+        description: "Adrena DAO with active proposals",
         network: "mainnet" as const,
-        website: "https://mango.markets",
-        token: "MNGO",
-      },
-      {
-        name: "Jupiter DAO",
-        address: "Gq3v8s5t2vN9mP3qR7sF6PY2zACB6FD7n2mXi9s6t7V3",
-        description: "Governs Jupiter - Solana's leading DEX aggregator and swap platform",
-        network: "mainnet" as const,
-        website: "https://jup.ag",
-        token: "JUP",
-      },
-      {
-        name: "MonkeDAO",
-        address: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
-        description: "Solana's first community-owned and operated NFT DAO, serving as a premier Web3.0 country club",
-        network: "mainnet" as const,
-        website: "https://monkedao.io",
-        token: "MONKE",
-      },
-      {
-        name: "Marinade DAO",
-        address: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
-        description: "Governs Marinade Finance - liquid staking protocol for Solana that mints mSOL (Marinade SOL)",
-        network: "mainnet" as const,
-        website: "https://marinade.finance",
-        token: "MNDE",
-      },
-      {
-        name: "Helium DAO",
-        address: "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1",
-        description: "Governs the Helium Network - decentralized wireless infrastructure and IoT network on Solana",
-        network: "mainnet" as const,
-        website: "https://www.helium.com",
-        token: "HNT",
+        website: "https://v2.realms.today/dao/GWe1VYTRMujAtGVhSLwSn4YPsXBLe5qfkzNAYAKD44Nk",
+        token: "ADRENA",
+        image: "/adrena.jpg",
+        // Specific governance addresses for this DAO
+        governanceAddresses: [
+          "HgeoVqTTMQ9K5GZAUpPKaz5PS8Rn55yR5e5SwmB3DbKB",
+          "HbzDAYnhidh35woSLmbqCgvjc52ZUPPQfN1fGDa7CTXx",
+        ],
+        // Treasury wallet address
+        treasuryAddress: "7VzEXYvGmLg3tdVuFuGFQdr7GP5tutTUt8EcTGHvG8Ev",
       },
     ],
   },

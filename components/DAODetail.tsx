@@ -1,12 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { ProposalList } from "./ProposalList";
 import type { DAO, AIAgent } from "@/types/dao";
 import { useAgentServiceContext } from "@/contexts/AgentServiceContext";
 import { AgentActivity } from "./AgentActivity";
-import { X, Wallet, Users, FileText } from "lucide-react";
-import { formatCurrency } from "@/lib/utils";
+import { X, FileText } from "lucide-react";
 
 export function DAODetail({
   dao,
@@ -22,17 +22,32 @@ export function DAODetail({
   );
   const agentService = useAgentServiceContext();
   const [agentActivities, setAgentActivities] = useState<any[]>([]);
+  const [proposalCount, setProposalCount] = useState(dao.proposalCount);
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div className="bg-slate-900 border border-slate-800 rounded-xl max-w-6xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
         {/* Header */}
         <div className="sticky top-0 bg-slate-900 border-b border-slate-800 p-6 flex justify-between items-start z-10">
-          <div>
-            <h2 className="text-3xl font-bold mb-2 text-white">{dao.name}</h2>
-            {dao.description && (
-              <p className="text-slate-400">{dao.description}</p>
+          <div className="flex items-center gap-4 flex-1">
+            {dao.image && (
+              <div className="w-16 h-16 rounded-lg overflow-hidden bg-slate-800 flex items-center justify-center flex-shrink-0 border border-slate-700">
+                <Image
+                  src={dao.image}
+                  alt={dao.name}
+                  width={64}
+                  height={64}
+                  className="object-contain"
+                  unoptimized
+                />
+              </div>
             )}
+            <div>
+              <h2 className="text-3xl font-bold mb-2 text-white">{dao.name}</h2>
+              {dao.description && (
+                <p className="text-slate-400">{dao.description}</p>
+              )}
+            </div>
           </div>
           <button
             onClick={onClose}
@@ -44,28 +59,12 @@ export function DAODetail({
 
         {/* DAO Stats */}
         <div className="p-6 border-b border-slate-800">
-          <div className="grid grid-cols-3 gap-4">
-            <div className="text-center p-4 bg-purple-500/10 border border-purple-500/30 rounded-lg">
-              <Wallet className="w-5 h-5 text-purple-400 mx-auto mb-2" />
-              <div className="text-2xl font-bold text-purple-400">
-                {formatCurrency(dao.treasury)}
-              </div>
-              <div className="text-sm text-slate-400 mt-1">Treasury</div>
+          <div className="text-center p-4 bg-green-500/10 border border-green-500/30 rounded-lg max-w-xs mx-auto">
+            <FileText className="w-5 h-5 text-green-400 mx-auto mb-2" />
+            <div className="text-2xl font-bold text-green-400">
+              {proposalCount}
             </div>
-            <div className="text-center p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-              <Users className="w-5 h-5 text-blue-400 mx-auto mb-2" />
-              <div className="text-2xl font-bold text-blue-400">
-                {dao.memberCount}
-              </div>
-              <div className="text-sm text-slate-400 mt-1">Members</div>
-            </div>
-            <div className="text-center p-4 bg-green-500/10 border border-green-500/30 rounded-lg">
-              <FileText className="w-5 h-5 text-green-400 mx-auto mb-2" />
-              <div className="text-2xl font-bold text-green-400">
-                {dao.proposalCount}
-              </div>
-              <div className="text-sm text-slate-400 mt-1">Proposals</div>
-            </div>
+            <div className="text-sm text-slate-400 mt-1">Proposals</div>
           </div>
         </div>
 
@@ -110,6 +109,9 @@ export function DAODetail({
             agent={selectedAgent}
             onActivityUpdate={(activity) => {
               setAgentActivities((prev) => [activity, ...prev].slice(0, 20));
+            }}
+            onProposalsLoaded={(count) => {
+              setProposalCount(count);
             }}
           />
         </div>

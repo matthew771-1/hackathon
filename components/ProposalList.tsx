@@ -10,10 +10,12 @@ export function ProposalList({
   daoAddress,
   agent,
   onActivityUpdate,
+  onProposalsLoaded,
 }: {
   daoAddress: string;
   agent?: AIAgent;
   onActivityUpdate?: (activity: Activity) => void;
+  onProposalsLoaded?: (count: number) => void;
 }) {
   const agentService = useAgentServiceContext();
   const [proposals, setProposals] = useState<Proposal[]>([]);
@@ -28,10 +30,17 @@ export function ProposalList({
         const { fetchProposals } = await import("@/lib/realms");
         const fetchedProposals = await fetchProposals(daoAddress);
         setProposals(fetchedProposals);
+        // Notify parent component of the actual proposal count
+        if (onProposalsLoaded) {
+          onProposalsLoaded(fetchedProposals.length);
+        }
       } catch (error) {
         console.error("Error loading proposals:", error);
         // Fallback to empty array if fetch fails
         setProposals([]);
+        if (onProposalsLoaded) {
+          onProposalsLoaded(0);
+        }
       } finally {
         setLoading(false);
       }
@@ -145,6 +154,7 @@ export function ProposalList({
           onAnalyze={handleAnalyze}
           analysis={analyses[proposal.id]}
           isAnalyzing={analyzingId === proposal.id}
+          daoAddress={daoAddress}
         />
       ))}
     </div>

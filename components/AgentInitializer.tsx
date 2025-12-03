@@ -74,13 +74,25 @@ export function AgentInitializer({
           <div className="text-sm text-red-600 dark:text-red-400">{error}</div>
         )}
 
-        <button
-          onClick={handleInitialize}
-          disabled={isInitializing || !openAIApiKey.trim()}
-          className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {isInitializing ? "Initializing..." : "Initialize Agent"}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => {
+              setOpenAIApiKey("");
+              setError(null);
+              onInitialized(false);
+            }}
+            className="flex-1 px-4 py-2 border rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleInitialize}
+            disabled={isInitializing || !openAIApiKey.trim()}
+            className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isInitializing ? "Initializing..." : "Initialize Agent"}
+          </button>
+        </div>
       </div>
 
       <p className="text-xs text-gray-500 dark:text-gray-400 mt-3">

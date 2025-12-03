@@ -106,6 +106,9 @@ export function AgentList({
                       setInitializingAgent(null);
                       // Clear success message after 5 seconds
                       setTimeout(() => setInitSuccess(null), 5000);
+                    } else if (success === false && maskedKey === undefined) {
+                      // Cancel was clicked
+                      setInitializingAgent(null);
                     }
                   }}
                 />

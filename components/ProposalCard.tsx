@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { Proposal } from "@/types/dao";
 import type { AIAgent } from "@/types/dao";
 import { formatAddress, getTimeRemaining, getStatusColor } from "@/lib/utils";
+import { ExternalLink } from "lucide-react";
 
 interface ProposalAnalysis {
   recommendation: "yes" | "no" | "abstain";
@@ -17,12 +18,14 @@ export function ProposalCard({
   onAnalyze,
   analysis: externalAnalysis,
   isAnalyzing: externalIsAnalyzing,
+  daoAddress,
 }: {
   proposal: Proposal;
   agent?: AIAgent;
   onAnalyze?: (proposal: Proposal, agent: AIAgent) => Promise<void>;
   analysis?: ProposalAnalysis | null;
   isAnalyzing?: boolean;
+  daoAddress?: string;
 }) {
   const [internalAnalysis, setInternalAnalysis] = useState<ProposalAnalysis | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -84,7 +87,14 @@ export function ProposalCard({
         </div>
         <div>
           <span className="text-gray-500">Proposer:</span>
-          <span className="ml-2 font-mono text-xs">{formatAddress(proposal.proposer)}</span>
+          <a
+            href={`https://solscan.io/account/${proposal.proposer}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="ml-2 font-mono text-xs text-purple-600 hover:text-purple-700 hover:underline"
+          >
+            {formatAddress(proposal.proposer)}
+          </a>
         </div>
         <div>
           <span className="text-gray-500">
@@ -97,6 +107,21 @@ export function ProposalCard({
           </span>
         </div>
       </div>
+
+      {/* Go-to links */}
+      {daoAddress && (
+        <div className="mb-4 flex items-center gap-3">
+          <a
+            href={`https://v2.realms.today/dao/${daoAddress}/proposal/${proposal.id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 text-sm text-purple-600 hover:text-purple-700 hover:underline"
+          >
+            <ExternalLink className="w-4 h-4" />
+            View on Realms
+          </a>
+        </div>
+      )}
 
       {analysis && (
         <div className="mb-4 p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">

@@ -9,6 +9,8 @@ export interface DAO {
   website?: string;
   token?: string;
   network?: "devnet" | "mainnet";
+  image?: string;
+  governanceAddresses?: string[]; // Specific governance account addresses
 }
 
 export interface Proposal {
