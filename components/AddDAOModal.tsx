@@ -155,7 +155,7 @@ export function AddDAOModal({ isOpen, onClose, onAdd }: AddDAOModalProps) {
               </button>
             </div>
             <p className="mt-1 text-xs text-slate-500">
-              Provide governance account addresses if you don't have the realm address. The realm will be automatically discovered from valid governance accounts.
+              Provide governance account addresses if you do not have the realm address. The realm will be automatically discovered from valid governance accounts.
             </p>
           </div>
 

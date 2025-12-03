@@ -156,6 +156,7 @@ export async function fetchDAOInfo(realmAddress: string): Promise<DAO> {
       description: popularDAO?.description || realmName || "A Solana DAO using SPL Governance",
       website: popularDAO?.website,
       token: popularDAO?.token,
+      tokenMint: (popularDAO as any)?.tokenMint,
       network,
       image: (popularDAO as any)?.image,
       governanceAddresses: (popularDAO as any)?.governanceAddresses || dynamicDAO?.governanceAddresses,
@@ -176,6 +177,7 @@ export async function fetchDAOInfo(realmAddress: string): Promise<DAO> {
       description: popularDAO?.description || "A Solana DAO using SPL Governance",
       website: popularDAO?.website,
       token: popularDAO?.token,
+      tokenMint: (popularDAO as any)?.tokenMint,
       network: popularDAO?.network || "mainnet",
       image: (popularDAO as any)?.image,
     };

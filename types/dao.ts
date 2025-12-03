@@ -8,6 +8,7 @@ export interface DAO {
   description?: string;
   website?: string;
   token?: string;
+  tokenMint?: string; // Governing token mint address for voting
   network?: "devnet" | "mainnet";
   image?: string;
   governanceAddresses?: string[]; // Specific governance account addresses
@@ -39,5 +40,14 @@ export interface VotingPreferences {
   focusAreas: string[];
   minVotingThreshold?: number;
   autoVote: boolean;
+  decisionSpeed?: "fast" | "deliberate";
+  treasuryPriority?: "growth" | "preservation";
+}
+
+export interface ProposalAnalysis {
+  recommendation: "yes" | "no" | "abstain";
+  reasoning: string;
+  confidence: number;
+  keyFactors: string[];
 }
 

@@ -184,7 +184,7 @@ export function DAOList({ agents }: { agents?: any[] }) {
       setDaos((prev) => {
         const updated = [...prev, daoWithGovernance];
         // Save custom DAOs to localStorage (exclude popular DAOs)
-        const popularDAOAddresses = new Set(POPULAR_SOLANA_DAOS.map(d => d.address));
+        const popularDAOAddresses = new Set<string>(POPULAR_SOLANA_DAOS.map(d => d.address));
         const customDAOs = updated.filter(dao => !popularDAOAddresses.has(dao.address));
         saveCustomDAOs(customDAOs);
         return updated;
@@ -203,7 +203,7 @@ export function DAOList({ agents }: { agents?: any[] }) {
       setDaos((prev) => {
         const updated = [...prev, newDAO];
         // Save custom DAOs to localStorage (exclude popular DAOs)
-        const popularDAOAddresses = new Set(POPULAR_SOLANA_DAOS.map(d => d.address));
+        const popularDAOAddresses = new Set<string>(POPULAR_SOLANA_DAOS.map(d => d.address));
         const customDAOs = updated.filter(dao => !popularDAOAddresses.has(dao.address));
         saveCustomDAOs(customDAOs);
         return updated;

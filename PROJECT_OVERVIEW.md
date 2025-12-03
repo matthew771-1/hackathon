@@ -36,7 +36,7 @@ An AI-powered platform that allows DAO members to delegate their governance powe
 - **Solana Integration**: @solana/kit, @solana/react, @solana/web3.js
 - **Wallet**: Wallet Standard (@wallet-standard/react)
 - **DAO Platform**: Solana DAOs using SPL Governance (Mango, Bonk, Star Atlas, Superteam, UXD, Jupiter)
-- **AI Framework**: SendAI Solana Agent Kit (https://github.com/sendaifun/solana-agent-kit)
+- **AI Framework**: OpenAI GPT-4o-mini (direct API integration)
 - **Network**: Solana Devnet/Mainnet
 - **Bounty Integration**: Circle/USDC for payments and treasury management
 
@@ -75,11 +75,11 @@ An AI-powered platform that allows DAO members to delegate their governance powe
    - Submit votes on behalf of users
    - Monitor governance activity across multiple DAOs
 
-2. **SendAI Solana Agent Kit**
-   - Framework for AI agent behavior
-   - Custom actions for proposal analysis
-   - Voting decision logic
-   - Integration with OpenAI for natural language understanding
+2. **OpenAI Integration**
+   - Direct OpenAI API integration for proposal analysis
+   - Custom governance-focused prompts
+   - Voting decision logic based on agent personality
+   - Natural language understanding for proposal content
 
 3. **Circle/USDC**
    - Treasury management features

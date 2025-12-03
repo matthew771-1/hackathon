@@ -1,12 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import Image from "next/image";
 import { ProposalList } from "./ProposalList";
 import type { DAO, AIAgent } from "@/types/dao";
-import { useAgentServiceContext } from "@/contexts/AgentServiceContext";
-import { AgentActivity } from "./AgentActivity";
-import { X, FileText } from "lucide-react";
+import { AgentActivity, ActivityItem } from "./AgentActivity";
+import { X, FileText, Bot } from "lucide-react";
 
 export function DAODetail({
   dao,
@@ -20,9 +19,11 @@ export function DAODetail({
   const [selectedAgent, setSelectedAgent] = useState<AIAgent | undefined>(
     agents.length > 0 ? agents[0] : undefined
   );
-  const agentService = useAgentServiceContext();
-  const [agentActivities, setAgentActivities] = useState<any[]>([]);
   const [proposalCount, setProposalCount] = useState(dao.proposalCount);
+
+  const handleProposalsLoaded = useCallback((count: number) => {
+    setProposalCount(count);
+  }, []);
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -69,9 +70,12 @@ export function DAODetail({
         </div>
 
         {/* Agent Selector */}
-        {agents.length > 0 && (
+        {agents.length > 0 ? (
           <div className="p-6 border-b border-slate-800">
-            <label className="block text-sm font-medium mb-2 text-slate-300">Analyze with AI Agent:</label>
+            <label className="block text-sm font-medium mb-2 text-slate-300">
+              <Bot className="w-4 h-4 inline mr-2" />
+              Analyze with AI Agent:
+            </label>
             <select
               value={selectedAgent?.id || ""}
               onChange={(e) => {
@@ -87,17 +91,24 @@ export function DAODetail({
               ))}
             </select>
           </div>
+        ) : (
+          <div className="p-6 border-b border-slate-800">
+            <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg text-center">
+              <Bot className="w-6 h-6 text-amber-400 mx-auto mb-2" />
+              <p className="text-amber-300 text-sm font-medium">No AI Agents Created</p>
+              <p className="text-amber-300/70 text-xs mt-1">
+                Create an agent in the &quot;My Agents&quot; tab to analyze proposals
+              </p>
+            </div>
+          </div>
         )}
 
-        {/* Agent Activity (if delegated) */}
+        {/* Agent Activity (only show if agent selected) */}
         {selectedAgent && (
-          <div className="p-6 border-b">
+          <div className="px-6 pt-6">
             <AgentActivity 
               agent={selectedAgent} 
               daoAddress={dao.address}
-              onActivityUpdate={(activity) => {
-                setAgentActivities((prev) => [activity, ...prev].slice(0, 20));
-              }}
             />
           </div>
         )}
@@ -106,17 +117,13 @@ export function DAODetail({
         <div className="p-6">
           <ProposalList
             daoAddress={dao.address}
+            daoNetwork={dao.network}
+            governingTokenMint={dao.tokenMint}
             agent={selectedAgent}
-            onActivityUpdate={(activity) => {
-              setAgentActivities((prev) => [activity, ...prev].slice(0, 20));
-            }}
-            onProposalsLoaded={(count) => {
-              setProposalCount(count);
-            }}
+            onProposalsLoaded={handleProposalsLoaded}
           />
         </div>
       </div>
     </div>
   );
 }
-

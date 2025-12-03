@@ -1,13 +1,12 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { SolanaAgentKit, KeypairWallet } from "solana-agent-kit";
 import { Keypair } from "@solana/web3.js";
 import type { AIAgent, Proposal } from "@/types/dao";
-import { analyzeProposal } from "@/lib/ai-agent";
+import { analyzeProposal, GovernanceAgentConfig, createGovernanceAgent } from "@/lib/ai-agent";
 
 interface AgentServiceState {
-  agents: Map<string, SolanaAgentKit>;
+  agents: Map<string, GovernanceAgentConfig>;
   apiKeys: Map<string, string>; // Store masked API keys
   initialized: boolean;
 }
@@ -28,15 +27,12 @@ export function useAgentService() {
       rpcUrl: string,
       openAIApiKey: string,
       walletKeypair?: Keypair
-    ): Promise<SolanaAgentKit | null> => {
+    ): Promise<GovernanceAgentConfig | null> => {
       try {
         // Generate a keypair for the agent if not provided
         const keypair = walletKeypair || Keypair.generate();
-        const wallet = new KeypairWallet(keypair, rpcUrl);
-
-        const solanaAgent = new SolanaAgentKit(wallet, rpcUrl, {
-          OPENAI_API_KEY: openAIApiKey,
-        });
+        
+        const agentConfig = createGovernanceAgent(keypair, rpcUrl, openAIApiKey);
 
         // Mask API key for display (show first 7 and last 4 characters)
         const maskedKey = openAIApiKey.length > 11
@@ -46,7 +42,7 @@ export function useAgentService() {
         setAgentInstances((prev) => {
           const newAgents = new Map(prev.agents);
           const newApiKeys = new Map(prev.apiKeys);
-          newAgents.set(agent.id, solanaAgent);
+          newAgents.set(agent.id, agentConfig);
           newApiKeys.set(agent.id, maskedKey);
           return {
             agents: newAgents,
@@ -55,7 +51,7 @@ export function useAgentService() {
           };
         });
 
-        return solanaAgent;
+        return agentConfig;
       } catch (error) {
         console.error("Error initializing agent:", error);
         return null;
@@ -68,7 +64,7 @@ export function useAgentService() {
    * Get an agent instance by ID
    */
   const getAgent = useCallback(
-    (agentId: string): SolanaAgentKit | undefined => {
+    (agentId: string): GovernanceAgentConfig | undefined => {
       return agentInstances.agents.get(agentId);
     },
     [agentInstances]
@@ -86,6 +82,7 @@ export function useAgentService() {
       recommendation: "yes" | "no" | "abstain";
       reasoning: string;
       confidence: number;
+      keyFactors?: string[];
     } | null> => {
       const agent = getAgent(agentId);
       if (!agent) {
@@ -133,4 +130,3 @@ export function useAgentService() {
     isInitialized: agentInstances.initialized,
   };
 }
-

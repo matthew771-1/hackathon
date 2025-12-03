@@ -29,6 +29,7 @@ export const APP_CONFIG = {
         network: "mainnet" as const,
         website: "https://v2.realms.today/dao/GWe1VYTRMujAtGVhSLwSn4YPsXBLe5qfkzNAYAKD44Nk",
         token: "ADRENA",
+        tokenMint: "G3T7ZLw2UHLejCQe3LxdUgme7kqRrNq379sLd95iJdEv", // Adrena governance token mint
         image: "/adrena.jpg",
         // Specific governance addresses for this DAO
         governanceAddresses: [

@@ -9,6 +9,8 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^2.0.76",
+    "@ai-sdk/react": "^2.0.106",
     "@solana/kit": "^5.0.0",
     "@solana/react": "^5.0.0",
     "@solana/spl-governance": "^0.3.28",
@@ -17,11 +19,13 @@
     "@wallet-standard/core": "^1.1.1",
     "@wallet-standard/react": "^1.0.1",
     "@wallet-standard/react-core": "^1.0.1",
+    "ai": "^5.0.106",
     "lucide-react": "^0.555.0",
     "next": "^15.0.0",
+    "openai": "^6.9.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "solana-agent-kit": "^2.0.10"
+    "zod": "^4.1.13"
   },
   "devDependencies": {
     "@types/node": "^20",
