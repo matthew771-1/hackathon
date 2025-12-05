@@ -1,24 +1,72 @@
 "use client";
 
-import { useState } from "react";
-import type { AIAgent } from "@/types/dao";
+import { useState, useEffect } from "react";
+import type { AIAgent, DAO } from "@/types/dao";
 import { X, Send, Info } from "lucide-react";
-import { POPULAR_SOLANA_DAOS } from "@/lib/realms";
+import { POPULAR_SOLANA_DAOS, fetchDAOInfo } from "@/lib/realms";
 import { delegateToAgent } from "@/lib/governance";
 import { PublicKey } from "@solana/web3.js";
 import { AgentActivity } from "./AgentActivity";
 
+// Storage key for custom DAOs (same as DAOList)
+const STORAGE_KEY = "dao-ai-agent-custom-daos";
+
 export function DelegationModal({
   agent,
   onClose,
+  availableDAOs,
 }: {
   agent: AIAgent;
   onClose: () => void;
+  availableDAOs?: DAO[];
 }) {
   const [selectedDAO, setSelectedDAO] = useState<string>("");
   const [isDelegating, setIsDelegating] = useState(false);
   const [delegationStatus, setDelegationStatus] = useState<string | null>(null);
   const [isDelegated, setIsDelegated] = useState(false);
+  const [daos, setDaos] = useState<DAO[]>([]);
+
+  // Load DAOs - use provided list or load from storage + popular
+  useEffect(() => {
+    if (availableDAOs && availableDAOs.length > 0) {
+      setDaos(availableDAOs);
+    } else {
+      // Load custom DAOs from localStorage
+      const loadDAOs = async () => {
+        const customDAOs: DAO[] = [];
+        try {
+          const stored = localStorage.getItem(STORAGE_KEY);
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            customDAOs.push(...parsed);
+          }
+        } catch (e) {
+          console.error("Error loading custom DAOs:", e);
+        }
+        
+        // Combine popular DAOs with custom DAOs
+        const popularDAOs: DAO[] = POPULAR_SOLANA_DAOS.map(dao => ({
+          name: dao.name,
+          address: dao.address,
+          realm: dao.address,
+          treasury: 0,
+          memberCount: 0,
+          proposalCount: 0,
+          description: dao.description,
+          network: dao.network,
+        }));
+        
+        // Merge and deduplicate
+        const allDAOs = [...popularDAOs, ...customDAOs];
+        const uniqueDAOs = allDAOs.filter((dao, index, self) => 
+          index === self.findIndex(d => d.address === dao.address)
+        );
+        
+        setDaos(uniqueDAOs);
+      };
+      loadDAOs();
+    }
+  }, [availableDAOs]);
 
   const handleDelegate = async () => {
     if (!selectedDAO) {
@@ -77,7 +125,7 @@ export function DelegationModal({
               className="w-full px-4 py-2.5 bg-slate-950/50 border border-slate-700 rounded-lg text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
             >
               <option value="" className="bg-slate-900">Choose a DAO...</option>
-              {POPULAR_SOLANA_DAOS.map((dao) => (
+              {daos.map((dao) => (
                 <option key={dao.address} value={dao.address} className="bg-slate-900">
                   {dao.name}
                 </option>

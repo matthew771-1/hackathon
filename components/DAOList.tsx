@@ -66,6 +66,28 @@ export function DAOList({ agents = [] }: { agents?: AIAgent[] }) {
   const [daos, setDaos] = useState<DAO[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDAO, setSelectedDAO] = useState<DAO | null>(null);
+  
+  // Helper to select a DAO and ensure tokenMint is populated
+  const selectDAO = async (dao: DAO) => {
+    // If tokenMint is missing, fetch fresh DAO info to get it
+    if (!dao.tokenMint) {
+      console.log(`Fetching tokenMint for ${dao.name}...`);
+      try {
+        const fullDAO = await fetchDAOInfo(dao.address);
+        if (fullDAO.tokenMint) {
+          const updatedDAO = { ...dao, tokenMint: fullDAO.tokenMint };
+          // Update the DAO in the list too
+          setDaos(prev => prev.map(d => d.address === dao.address ? updatedDAO : d));
+          setSelectedDAO(updatedDAO);
+          console.log(`Got tokenMint for ${dao.name}: ${fullDAO.tokenMint}`);
+          return;
+        }
+      } catch (error) {
+        console.error(`Failed to fetch tokenMint for ${dao.name}:`, error);
+      }
+    }
+    setSelectedDAO(dao);
+  };
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isDelegationModalOpen, setIsDelegationModalOpen] = useState(false);
   const [pendingDelegationAgentId, setPendingDelegationAgentId] = useState<string | null>(null);
@@ -713,7 +735,7 @@ export function DAOList({ agents = [] }: { agents?: AIAgent[] }) {
                                   const customDAOs = [...daos, fullDAO].filter(d => !popularAddresses.has(d.address));
                                   localStorage.setItem(STORAGE_KEY, JSON.stringify(customDAOs));
                                 }
-                                setSelectedDAO(fullDAO);
+                                selectDAO(fullDAO);
                                 setShowSearch(false);
                                 setSearchQuery("");
                                 setSearchResults([]);
@@ -793,7 +815,7 @@ export function DAOList({ agents = [] }: { agents?: AIAgent[] }) {
                       <button
                         key={dao.address}
                         onClick={() => {
-                          setSelectedDAO(dao);
+                          selectDAO(dao);
                           setIsDropdownOpen(false);
                         }}
                         className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-800 transition-colors text-left ${
@@ -982,7 +1004,7 @@ export function DAOList({ agents = [] }: { agents?: AIAgent[] }) {
               </div>
             </div>
             <button
-              onClick={() => setSelectedDAO(dao)}
+              onClick={() => selectDAO(dao)}
               className="w-full px-4 py-2.5 bg-gradient-to-r from-purple-600 to-fuchsia-600 text-white rounded-lg hover:from-purple-700 hover:to-fuchsia-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-purple-500/20"
             >
               <ExternalLink className="w-4 h-4" />
