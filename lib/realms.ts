@@ -117,10 +117,18 @@ export async function fetchDAOInfo(realmAddress: string): Promise<DAO> {
       realmData = realmAccount.account;
       realmName = realmData.name;
       
-      // Don't fetch full proposals here - just get a quick count to avoid double fetching
-      // The full proposals will be fetched when user clicks "View DAO"
-      // For now, use a placeholder count that will be updated when proposals are actually fetched
-      proposalCount = 0; // Will be updated when proposals are fetched in DAODetail
+      // Try to get proposal count from cache if available
+      const cached = proposalCache.get(realmAddress);
+      if (cached && (Date.now() - cached.timestamp) < CACHE_TTL) {
+        // Use cached proposals count
+        const activeCount = cached.proposals.filter(p => 
+          p.status === "draft" || p.status === "voting"
+        ).length;
+        proposalCount = activeCount;
+      } else {
+        // Will be updated when proposals are fetched in the UI
+        proposalCount = 0;
+      }
 
       // Get token owner records count as member count
       // Note: This requires complex filtering - simplified for now

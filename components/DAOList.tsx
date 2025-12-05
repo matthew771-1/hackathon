@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Image from "next/image";
 import type { DAO, AIAgent, Proposal, ScheduledVote, ProposalAnalysis } from "@/types/dao";
 import { POPULAR_SOLANA_DAOS, fetchDAOInfo, fetchProposals } from "@/lib/realms";
 import { DAODetail } from "./DAODetail";
 import { ScheduledVotesPanel } from "./ScheduledVotesPanel";
 import { ProposalList } from "./ProposalList";
+import { AIAgentPanel } from "./AIAgentPanel";
 import { useAgentServiceContext } from "@/contexts/AgentServiceContext";
 import { Building2, FileText, ExternalLink, Plus, ChevronDown, Bot, Zap, RefreshCw, Search, Loader2 } from "lucide-react";
 import { AddDAOModal } from "./AddDAOModal";
@@ -60,6 +61,9 @@ export function DAOList({ agents = [] }: { agents?: AIAgent[] }) {
   const [searchResults, setSearchResults] = useState<DAO[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  
+  // Ref to store selected DAO address for stable callback
+  const selectedDAOAddressRef = useRef<string | null>(null);
 
   useEffect(() => {
     // Load popular Solana DAOs and custom DAOs
@@ -154,6 +158,11 @@ export function DAOList({ agents = [] }: { agents?: AIAgent[] }) {
     }
   }, []);
 
+  // Update ref when selectedDAO changes
+  useEffect(() => {
+    selectedDAOAddressRef.current = selectedDAO?.address || null;
+  }, [selectedDAO?.address]);
+
   // Load proposals when DAO is selected
   useEffect(() => {
     if (!selectedDAO) {
@@ -172,19 +181,19 @@ export function DAOList({ agents = [] }: { agents?: AIAgent[] }) {
     };
 
     loadProposals();
-  }, [selectedDAO]);
+  }, [selectedDAO?.address]);
 
   // Save delegations
-  const saveDelegations = (newDelegations: DelegationMap) => {
+  const saveDelegations = useCallback((newDelegations: DelegationMap) => {
     localStorage.setItem(DELEGATIONS_KEY, JSON.stringify(newDelegations));
     setDelegations(newDelegations);
-  };
+  }, []);
 
   // Save scheduled votes
-  const saveScheduledVotes = (votes: ScheduledVote[]) => {
+  const saveScheduledVotes = useCallback((votes: ScheduledVote[]) => {
     localStorage.setItem(SCHEDULED_VOTES_KEY, JSON.stringify(votes));
     setScheduledVotes(votes);
-  };
+  }, []);
 
   // Get delegated agent for selected DAO
   const getDelegatedAgent = useCallback((): AIAgent | null => {
@@ -192,6 +201,100 @@ export function DAOList({ agents = [] }: { agents?: AIAgent[] }) {
     const agentId = delegations[selectedDAO.address];
     return agents.find(a => a.id === agentId) || null;
   }, [selectedDAO, delegations, agents]);
+
+  // Auto-analyze proposals when agent with autoVote is delegated
+  useEffect(() => {
+    const agent = getDelegatedAgent();
+    if (!agent || !selectedDAO || !agentService || !proposals.length || autoAnalyzing) {
+      return;
+    }
+
+    // Only auto-analyze if agent has autoVote enabled
+    if (!agent.votingPreferences.autoVote) {
+      return;
+    }
+
+    const agentInstance = agentService.getAgent(agent.id);
+    if (!agentInstance) {
+      return; // Agent not initialized yet
+    }
+
+    // Find active proposals that haven't been analyzed yet
+    const activeProposals = proposals.filter(
+      p => (p.status === "voting" || p.status === "draft") && !analyses[p.id]
+    );
+
+    if (activeProposals.length === 0) {
+      return;
+    }
+
+    // Automatically analyze proposals
+    const autoAnalyze = async () => {
+      setAutoAnalyzing(true);
+
+      for (const proposal of activeProposals) {
+        try {
+          const analysis = await agentService.analyzeProposalWithAgent(
+            agent.id,
+            proposal,
+            agent
+          );
+
+          if (analysis) {
+            const typedAnalysis: ProposalAnalysis = {
+              recommendation: analysis.recommendation,
+              reasoning: analysis.reasoning,
+              confidence: analysis.confidence,
+              keyFactors: analysis.keyFactors || [],
+            };
+            setAnalyses(prev => ({ ...prev, [proposal.id]: typedAnalysis }));
+
+            // Schedule vote if auto-vote enabled and confidence threshold met
+            const minConfidence = agent.votingPreferences.minVotingThreshold || 70;
+            
+            if (typedAnalysis.confidence >= minConfidence && typedAnalysis.recommendation !== "abstain") {
+              const scheduledTime = new Date();
+              scheduledTime.setMinutes(scheduledTime.getMinutes() + 2);
+
+              const newVote: ScheduledVote = {
+                id: `vote-${Date.now()}-${proposal.id}`,
+                proposalId: proposal.id,
+                proposalTitle: proposal.title,
+                daoAddress: selectedDAO.address,
+                daoName: selectedDAO.name,
+                agentId: agent.id,
+                agentName: agent.name,
+                recommendation: typedAnalysis.recommendation as "yes" | "no",
+                confidence: typedAnalysis.confidence,
+                scheduledTime,
+                status: "pending",
+                reasoning: typedAnalysis.reasoning,
+              };
+
+              setScheduledVotes((prev) => {
+                const existing = prev.find(v => v.proposalId === proposal.id && v.status === "pending");
+                if (!existing) {
+                  const updated = [...prev, newVote];
+                  saveScheduledVotes(updated);
+                  return updated;
+                }
+                return prev;
+              });
+            }
+          }
+        } catch (error) {
+          console.error(`Error analyzing proposal ${proposal.id}:`, error);
+        }
+      }
+
+      setAutoAnalyzing(false);
+    };
+
+    // Small delay to avoid multiple triggers
+    const timeoutId = setTimeout(autoAnalyze, 500);
+    return () => clearTimeout(timeoutId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proposals.length, selectedDAO?.address, delegations, agents]);
 
   // Auto-analyze proposals
   const runAutoAnalysis = useCallback(async () => {
@@ -266,6 +369,22 @@ export function DAOList({ agents = [] }: { agents?: AIAgent[] }) {
 
     setAutoAnalyzing(false);
   }, [getDelegatedAgent, selectedDAO, agentService, proposals, analyses, scheduledVotes]);
+
+  // Memoized callback to update proposal count when proposals are loaded
+  const handleProposalsLoaded = useCallback((count: number) => {
+    const daoAddress = selectedDAOAddressRef.current;
+    if (!daoAddress) return;
+    
+    // Update DAO proposal count in the list only
+    // Don't update selectedDAO to avoid infinite loop
+    setDaos((prev) => 
+      prev.map((dao) => 
+        dao.address === daoAddress 
+          ? { ...dao, proposalCount: count }
+          : dao
+      )
+    );
+  }, []); // Empty deps - uses ref to get current address
 
   // Handle agent delegation
   const handleDelegateAgent = (agentId: string) => {
@@ -438,6 +557,7 @@ export function DAOList({ agents = [] }: { agents?: AIAgent[] }) {
     }
   };
 
+  // Get the delegated agent for the selected DAO
   const delegatedAgent = getDelegatedAgent();
   const pendingVotes = scheduledVotes.filter(
     v => v.status === "pending" && (!selectedDAO || v.daoAddress === selectedDAO.address)
@@ -725,13 +845,6 @@ export function DAOList({ agents = [] }: { agents?: AIAgent[] }) {
         )}
       </div>
 
-      {/* Scheduled Votes Panel */}
-      {selectedDAO && pendingVotes.length > 0 && (
-        <ScheduledVotesPanel
-          scheduledVotes={pendingVotes}
-          onCancelVote={handleCancelVote}
-        />
-      )}
 
       {/* Old Grid View - Keep for reference but hide when DAO selected */}
       {!selectedDAO && (
@@ -808,19 +921,24 @@ export function DAOList({ agents = [] }: { agents?: AIAgent[] }) {
       {/* Selected DAO View */}
       {selectedDAO && (
         <div className="space-y-6">
-          {/* Proposals List */}
-          <div>
-            <h2 className="text-xl font-bold text-white flex items-center gap-2 mb-4">
-              <FileText className="w-5 h-5 text-purple-400" />
-              Active Proposals
-            </h2>
-            <ProposalList
-              daoAddress={selectedDAO.address}
-              daoNetwork={selectedDAO.network}
-              governingTokenMint={selectedDAO.tokenMint}
-              agent={delegatedAgent || undefined}
+          {/* AI Agent Panel - Show when agent is delegated */}
+          {delegatedAgent && (
+            <AIAgentPanel
+              agent={delegatedAgent}
+              dao={selectedDAO}
+              scheduledVotes={scheduledVotes}
+              onCancelVote={handleCancelVote}
             />
-          </div>
+          )}
+
+          {/* Proposals List */}
+          <ProposalList
+            daoAddress={selectedDAO.address}
+            daoNetwork={selectedDAO.network}
+            governingTokenMint={selectedDAO.tokenMint}
+            agent={delegatedAgent || undefined}
+            onProposalsLoaded={handleProposalsLoaded}
+          />
         </div>
       )}
 

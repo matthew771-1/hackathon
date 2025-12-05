@@ -51,7 +51,8 @@ export function ProposalList({
     };
 
     loadProposals();
-  }, [daoAddress, onProposalsLoaded]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [daoAddress]); // onProposalsLoaded is a callback, doesn't need to trigger re-fetch
 
   // Filter proposals based on active/past toggle
   const filteredProposals = useMemo(() => {

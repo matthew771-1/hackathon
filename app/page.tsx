@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { WalletProvider } from "@/components/WalletProvider";
 import { WalletButton } from "@/components/WalletButton";
 import { DAOList } from "@/components/DAOList";
+import { HomePage } from "@/components/HomePage";
 import { AgentCreator } from "@/components/AgentCreator";
 import { AgentList } from "@/components/AgentList";
 import { Settings } from "@/components/Settings";
@@ -15,7 +16,7 @@ const AGENTS_STORAGE_KEY = "dao-ai-agent-agents";
 
 export default function Home() {
   const [agents, setAgents] = useState<AIAgent[]>([]);
-  const [activeTab, setActiveTab] = useState<"agents" | "daos">("daos");
+  const [activeTab, setActiveTab] = useState<"home" | "agents" | "daos">("home"); // Default to home page
   const [showSettings, setShowSettings] = useState(false);
 
   // Load agents from localStorage
@@ -97,6 +98,16 @@ export default function Home() {
           {/* Tabs */}
           <div className="flex gap-2 mb-8">
             <button
+              onClick={() => setActiveTab("home")}
+              className={`px-6 py-3 font-semibold transition-all rounded-lg ${
+                activeTab === "home"
+                  ? "bg-gradient-to-r from-purple-600 to-fuchsia-600 text-white shadow-lg shadow-purple-500/20"
+                  : "text-slate-400 hover:text-slate-300 hover:bg-slate-900/50"
+              }`}
+            >
+              Home
+            </button>
+            <button
               onClick={() => setActiveTab("agents")}
               className={`px-6 py-3 font-semibold transition-all rounded-lg ${
                 activeTab === "agents"
@@ -114,13 +125,15 @@ export default function Home() {
                   : "text-slate-400 hover:text-slate-300 hover:bg-slate-900/50"
               }`}
             >
-              DAOscan
+              DAOs
             </button>
           </div>
 
           {/* Content */}
           <div className="space-y-6">
-            {activeTab === "agents" ? (
+            {activeTab === "home" ? (
+              <HomePage agents={agents} />
+            ) : activeTab === "agents" ? (
               <>
                 <AgentCreator onAgentCreated={handleAgentCreated} />
                 <AgentList agents={agents} onAgentUpdate={handleAgentUpdate} />
