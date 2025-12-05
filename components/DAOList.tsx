@@ -8,8 +8,10 @@ import { DAODetail } from "./DAODetail";
 import { ScheduledVotesPanel } from "./ScheduledVotesPanel";
 import { ProposalList } from "./ProposalList";
 import { AIAgentPanel } from "./AIAgentPanel";
+import { DelegationConfirmModal } from "./DelegationConfirmModal";
 import { useAgentServiceContext } from "@/contexts/AgentServiceContext";
-import { Building2, FileText, ExternalLink, Plus, ChevronDown, Bot, Zap, RefreshCw, Search, Loader2 } from "lucide-react";
+import { useWalletContext } from "./WalletProvider";
+import { Building2, FileText, ExternalLink, Plus, ChevronDown, Bot, Zap, RefreshCw, Search, Loader2, Shield, AlertTriangle } from "lucide-react";
 import { AddDAOModal } from "./AddDAOModal";
 
 const STORAGE_KEY = "dao-ai-agent-custom-daos";
@@ -27,12 +29,25 @@ const saveCustomDAOs = (daos: DAO[]) => {
   }
 };
 
-const loadCustomDAOs = (): DAO[] => {
+const loadCustomDAOs = async (): Promise<DAO[]> => {
   if (typeof window !== "undefined") {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
-        return JSON.parse(stored);
+        const daos = JSON.parse(stored) as DAO[];
+        
+        // Re-register dynamic DAOs with their governance addresses
+        const { registerDynamicDAO } = await import("@/lib/realms");
+        for (const dao of daos) {
+          if (dao.governanceAddresses && dao.governanceAddresses.length > 0) {
+            registerDynamicDAO(dao.address, {
+              governanceAddresses: dao.governanceAddresses,
+              network: dao.network || "mainnet",
+            });
+          }
+        }
+        
+        return daos;
       }
     } catch (error) {
       console.error("Error loading custom DAOs from localStorage:", error);
@@ -47,10 +62,13 @@ interface DelegationMap {
 
 export function DAOList({ agents = [] }: { agents?: AIAgent[] }) {
   const agentService = useAgentServiceContext();
+  const { isConnected, publicKey } = useWalletContext();
   const [daos, setDaos] = useState<DAO[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDAO, setSelectedDAO] = useState<DAO | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isDelegationModalOpen, setIsDelegationModalOpen] = useState(false);
+  const [pendingDelegationAgentId, setPendingDelegationAgentId] = useState<string | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [delegations, setDelegations] = useState<DelegationMap>({});
   const [scheduledVotes, setScheduledVotes] = useState<ScheduledVote[]>([]);
@@ -70,8 +88,8 @@ export function DAOList({ agents = [] }: { agents?: AIAgent[] }) {
     const loadDAOs = async () => {
       setLoading(true);
       try {
-        // Load custom DAOs from localStorage
-        const customDAOs = loadCustomDAOs();
+        // Load custom DAOs from localStorage (and register their governance addresses)
+        const customDAOs = await loadCustomDAOs();
         const customDAOAddresses = new Set(customDAOs.map(dao => dao.address));
         
         // Fetch DAO info for each popular Solana DAO (only if not already in custom DAOs)
@@ -113,7 +131,7 @@ export function DAOList({ agents = [] }: { agents?: AIAgent[] }) {
       } catch (error) {
         console.error("Error loading DAOs:", error);
         // Fallback: load custom DAOs and basic popular DAOs
-        const customDAOs = loadCustomDAOs();
+        const customDAOs = await loadCustomDAOs();
         const fallbackDAOs: DAO[] = POPULAR_SOLANA_DAOS.map((dao) => ({
           name: dao.name,
           address: dao.address,
@@ -228,11 +246,21 @@ export function DAOList({ agents = [] }: { agents?: AIAgent[] }) {
       return;
     }
 
-    // Automatically analyze proposals
+    // Automatically analyze proposals with rate limiting
     const autoAnalyze = async () => {
       setAutoAnalyzing(true);
 
-      for (const proposal of activeProposals) {
+      // Only analyze first 3 proposals to avoid rate limits
+      const proposalsToAnalyze = activeProposals.slice(0, 3);
+
+      for (let i = 0; i < proposalsToAnalyze.length; i++) {
+        const proposal = proposalsToAnalyze[i];
+        
+        // Add delay between requests to avoid rate limits (except for first request)
+        if (i > 0) {
+          await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay
+        }
+        
         try {
           const analysis = await agentService.analyzeProposalWithAgent(
             agent.id,
@@ -282,8 +310,13 @@ export function DAOList({ agents = [] }: { agents?: AIAgent[] }) {
               });
             }
           }
-        } catch (error) {
+        } catch (error: any) {
           console.error(`Error analyzing proposal ${proposal.id}:`, error);
+          // Stop on rate limit errors
+          if (error?.message?.includes("rate limit")) {
+            console.warn("Rate limit hit, stopping auto-analysis. Will retry later.");
+            break;
+          }
         }
       }
 
@@ -296,7 +329,7 @@ export function DAOList({ agents = [] }: { agents?: AIAgent[] }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [proposals.length, selectedDAO?.address, delegations, agents]);
 
-  // Auto-analyze proposals
+  // Auto-analyze proposals (manual trigger)
   const runAutoAnalysis = useCallback(async () => {
     const agent = getDelegatedAgent();
     if (!agent || !selectedDAO || !agentService) return;
@@ -311,11 +344,21 @@ export function DAOList({ agents = [] }: { agents?: AIAgent[] }) {
       p => (p.status === "voting" || p.status === "draft") && !analyses[p.id]
     );
 
-    if (activeProposals.length === 0) return;
+    if (activeProposals.length === 0) {
+      alert("No proposals to analyze.");
+      return;
+    }
 
     setAutoAnalyzing(true);
 
-    for (const proposal of activeProposals) {
+    for (let i = 0; i < activeProposals.length; i++) {
+      const proposal = activeProposals[i];
+      
+      // Add delay between requests to avoid rate limits (except for first request)
+      if (i > 0) {
+        await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay
+      }
+      
       try {
         const analysis = await agentService.analyzeProposalWithAgent(
           agent.id,
@@ -362,8 +405,13 @@ export function DAOList({ agents = [] }: { agents?: AIAgent[] }) {
             }
           }
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error(`Error analyzing proposal ${proposal.id}:`, error);
+        // Stop on rate limit errors
+        if (error?.message?.includes("rate limit")) {
+          alert("OpenAI rate limit reached. Please wait a moment and try again.");
+          break;
+        }
       }
     }
 
@@ -386,11 +434,30 @@ export function DAOList({ agents = [] }: { agents?: AIAgent[] }) {
     );
   }, []); // Empty deps - uses ref to get current address
 
-  // Handle agent delegation
+  // Handle agent delegation - show confirmation modal first
   const handleDelegateAgent = (agentId: string) => {
     if (!selectedDAO) return;
-    const newDelegations = { ...delegations, [selectedDAO.address]: agentId };
+    
+    // If removing delegation, do it directly
+    if (!agentId) {
+      const newDelegations = { ...delegations };
+      delete newDelegations[selectedDAO.address];
+      saveDelegations(newDelegations);
+      return;
+    }
+    
+    // Show delegation confirmation modal
+    setPendingDelegationAgentId(agentId);
+    setIsDelegationModalOpen(true);
+  };
+
+  // Confirm delegation
+  const confirmDelegation = () => {
+    if (!selectedDAO || !pendingDelegationAgentId) return;
+    const newDelegations = { ...delegations, [selectedDAO.address]: pendingDelegationAgentId };
     saveDelegations(newDelegations);
+    setIsDelegationModalOpen(false);
+    setPendingDelegationAgentId(null);
   };
 
   // Handle canceling a scheduled vote
@@ -399,6 +466,15 @@ export function DAOList({ agents = [] }: { agents?: AIAgent[] }) {
       v.id === voteId ? { ...v, status: "cancelled" as const } : v
     );
     saveScheduledVotes(updated);
+  };
+
+  // Handle vote execution
+  const handleExecuteVote = (voteId: string, signature: string) => {
+    const updated = scheduledVotes.map(v =>
+      v.id === voteId ? { ...v, status: "executed" as const } : v
+    );
+    saveScheduledVotes(updated);
+    console.log(`Vote ${voteId} executed with signature: ${signature}`);
   };
 
   // Handle search
@@ -921,6 +997,28 @@ export function DAOList({ agents = [] }: { agents?: AIAgent[] }) {
       {/* Selected DAO View */}
       {selectedDAO && (
         <div className="space-y-6">
+          {/* Wallet Connection Prompt */}
+          {!isConnected && (
+            <div className="bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-amber-500/10 border border-amber-500/30 rounded-xl p-6">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-xl bg-amber-500/20 flex items-center justify-center flex-shrink-0">
+                  <AlertTriangle className="w-6 h-6 text-amber-400" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-semibold text-amber-400 text-lg mb-1">Wallet Not Connected</h3>
+                  <p className="text-slate-400 text-sm mb-3">
+                    Connect your wallet to vote on proposals and delegate to AI agents. 
+                    Your wallet is needed to sign voting transactions on the Solana blockchain.
+                  </p>
+                  <div className="flex items-center gap-2 text-xs text-slate-500">
+                    <Shield className="w-4 h-4" />
+                    <span>Your tokens remain in your wallet - we only request permission to vote</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* AI Agent Panel - Show when agent is delegated */}
           {delegatedAgent && (
             <AIAgentPanel
@@ -928,6 +1026,7 @@ export function DAOList({ agents = [] }: { agents?: AIAgent[] }) {
               dao={selectedDAO}
               scheduledVotes={scheduledVotes}
               onCancelVote={handleCancelVote}
+              onExecuteVote={handleExecuteVote}
             />
           )}
 
@@ -947,6 +1046,19 @@ export function DAOList({ agents = [] }: { agents?: AIAgent[] }) {
         onClose={() => setIsAddModalOpen(false)}
         onAdd={handleAddDAO}
       />
+
+      {/* Delegation Confirmation Modal */}
+      {isDelegationModalOpen && selectedDAO && pendingDelegationAgentId && (
+        <DelegationConfirmModal
+          agent={agents.find(a => a.id === pendingDelegationAgentId)!}
+          dao={selectedDAO}
+          onConfirm={confirmDelegation}
+          onClose={() => {
+            setIsDelegationModalOpen(false);
+            setPendingDelegationAgentId(null);
+          }}
+        />
+      )}
     </div>
   );
 }

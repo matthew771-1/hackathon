@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import Image from "next/image";
 import { PublicKey, Connection } from "@solana/web3.js";
 import { getAssociatedTokenAddress, getAccount } from "@solana/spl-token";
+import { getTokenOwnerRecordsByOwner } from "@solana/spl-governance";
 import type { DAO, AIAgent, ScheduledVote, Proposal, ProposalAnalysis } from "@/types/dao";
 import { POPULAR_SOLANA_DAOS, fetchDAOInfo, fetchProposals } from "@/lib/realms";
 import { getRpcUrl, APP_CONFIG } from "@/lib/config";
@@ -45,6 +46,7 @@ export function HomePage({ agents }: HomePageProps) {
   const [tokenBalances, setTokenBalances] = useState<TokenBalance[]>([]);
   const [eligibleDAOs, setEligibleDAOs] = useState<DAO[]>([]);
   const [loading, setLoading] = useState(true);
+  const [rpcError, setRpcError] = useState<string | null>(null);
   const [delegations, setDelegations] = useState<DelegationMap>({});
   const [scheduledVotes, setScheduledVotes] = useState<ScheduledVote[]>([]);
   const [selectedDAO, setSelectedDAO] = useState<DAO | null>(null);
@@ -112,14 +114,39 @@ export function HomePage({ agents }: HomePageProps) {
       }
 
       setLoading(true);
+      setRpcError(null);
       try {
         const walletPubkey = new PublicKey(walletAddress);
-        const connection = new Connection(getRpcUrl("mainnet"), "confirmed");
+        const connection = new Connection(getRpcUrl("mainnet"), {
+          commitment: "confirmed",
+          confirmTransactionInitialTimeout: 30000,
+        });
+        const governanceProgramId = new PublicKey(APP_CONFIG.solanaDAOs.governanceProgramId);
         
         // Get all token accounts for the wallet
-        const tokenAccounts = await connection.getParsedTokenAccountsByOwner(walletPubkey, {
-          programId: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
-        });
+        let tokenAccounts;
+        let hadRpcError = false;
+        try {
+          tokenAccounts = await connection.getParsedTokenAccountsByOwner(walletPubkey, {
+            programId: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+          });
+        } catch (error: any) {
+          // Handle various RPC errors
+          const errorMessage = error?.message || String(error);
+          hadRpcError = true;
+          if (errorMessage.includes("403") || error?.code === 403 || error?.error?.code === 403) {
+            console.error("⚠️ RPC rate limit (403). Please set NEXT_PUBLIC_SOLANA_MAINNET_RPC in .env.local");
+            setRpcError("RPC rate limit reached. Consider setting up a custom RPC endpoint.");
+          } else if (errorMessage.includes("Failed to fetch") || errorMessage.includes("fetch")) {
+            console.error("⚠️ Network error connecting to Solana RPC. The public RPC may be overloaded.");
+            setRpcError("Network error connecting to Solana. The public RPC may be overloaded.");
+          } else {
+            console.error("⚠️ Error fetching token accounts:", errorMessage);
+            setRpcError("Error connecting to Solana network.");
+          }
+          // Continue without token accounts - we'll still try to find DAOs via governance records
+          tokenAccounts = { value: [] };
+        }
 
         const balances: TokenBalance[] = [];
         const tokenMintMap = new Map<string, TokenBalance>();
@@ -139,22 +166,95 @@ export function HomePage({ agents }: HomePageProps) {
 
         setTokenBalances(balances);
 
-        // Match tokens to DAOs
+        // Match tokens to DAOs (check both direct token ownership AND governance voting power)
         const daos: DAO[] = [];
+        const checkedAddresses = new Set<string>();
+        
+        // Method 1: Check direct token ownership
         for (const daoConfig of POPULAR_SOLANA_DAOS) {
           if (daoConfig.tokenMint && tokenMintMap.has(daoConfig.tokenMint)) {
             try {
               const dao = await fetchDAOInfo(daoConfig.address);
               daos.push(dao);
+              checkedAddresses.add(daoConfig.address);
             } catch (error) {
               console.error(`Error fetching DAO ${daoConfig.name}:`, error);
             }
           }
         }
 
+        // Method 2: Check governance Token Owner Records (catches staked tokens)
+        try {
+          const tokenOwnerRecords = await getTokenOwnerRecordsByOwner(
+            connection,
+            governanceProgramId,
+            walletPubkey
+          );
+
+          console.log(`Found ${tokenOwnerRecords.length} Token Owner Records for wallet`);
+
+          for (const record of tokenOwnerRecords) {
+            const realmAddress = record.account.realm.toBase58();
+            
+            // Skip if we already added this DAO
+            if (checkedAddresses.has(realmAddress)) continue;
+
+            // Check if this realm is in our popular DAOs
+            const daoConfig = POPULAR_SOLANA_DAOS.find(d => d.address === realmAddress);
+            
+            // Check if user has voting power (deposited tokens)
+            const depositedAmount = record.account.governingTokenDepositAmount;
+            const hasVotingPower = depositedAmount && depositedAmount > BigInt(0);
+
+            if (hasVotingPower) {
+              console.log(`Found voting power in realm ${realmAddress}: ${depositedAmount.toString()}`);
+              
+              try {
+                const dao = await fetchDAOInfo(realmAddress);
+                
+                // Add token balance info for staked tokens
+                if (daoConfig?.tokenMint) {
+                  const stakedBalance: TokenBalance = {
+                    mint: daoConfig.tokenMint,
+                    amount: Number(depositedAmount) / Math.pow(10, 6), // Assuming 6 decimals
+                    decimals: 6,
+                  };
+                  
+                  // Add to balances if not already there
+                  if (!tokenMintMap.has(daoConfig.tokenMint)) {
+                    balances.push(stakedBalance);
+                    tokenMintMap.set(daoConfig.tokenMint, stakedBalance);
+                  }
+                }
+                
+                daos.push(dao);
+                checkedAddresses.add(realmAddress);
+              } catch (error) {
+                console.error(`Error fetching DAO for realm ${realmAddress}:`, error);
+              }
+            }
+          }
+        } catch (error: any) {
+          // Handle various RPC errors
+          const errorMessage = error?.message || String(error);
+          if (errorMessage.includes("403") || error?.code === 403 || error?.error?.code === 403) {
+            console.error("⚠️ RPC rate limit (403) when fetching governance records. Please set NEXT_PUBLIC_SOLANA_MAINNET_RPC in .env.local");
+          } else if (errorMessage.includes("Failed to fetch") || errorMessage.includes("fetch")) {
+            console.error("⚠️ Network error connecting to Solana RPC when fetching governance records.");
+          } else {
+            console.error("Error fetching Token Owner Records:", error);
+          }
+        }
+
+        setTokenBalances(balances);
         setEligibleDAOs(daos);
-      } catch (error) {
-        console.error("Error fetching token balances:", error);
+      } catch (error: any) {
+        const errorMessage = error?.message || String(error);
+        if (errorMessage.includes("Failed to fetch") || errorMessage.includes("fetch")) {
+          console.error("⚠️ Network error: Unable to connect to Solana RPC. The public endpoint may be overloaded.");
+        } else {
+          console.error("Error fetching token balances:", error);
+        }
       } finally {
         setLoading(false);
       }
@@ -448,9 +548,20 @@ export function HomePage({ agents }: HomePageProps) {
             <div className="p-8 bg-slate-900/50 border border-slate-800 rounded-xl text-center">
               <Building2 className="w-12 h-12 text-slate-600 mx-auto mb-3" />
               <p className="text-slate-400 mb-1">No eligible DAOs found</p>
-              <p className="text-sm text-slate-500">
-                You don't currently hold governance tokens for any supported DAOs.
+              <p className="text-sm text-slate-500 mb-3">
+                {rpcError 
+                  ? "Could not check your token balances due to network issues."
+                  : "You don't currently hold governance tokens for any supported DAOs."}
               </p>
+              {rpcError && (
+                <div className="mt-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-left max-w-md mx-auto">
+                  <p className="text-sm text-amber-400 font-medium mb-1">⚠️ RPC Connection Issue</p>
+                  <p className="text-xs text-amber-300/80">{rpcError}</p>
+                  <p className="text-xs text-slate-500 mt-2">
+                    Tip: Set NEXT_PUBLIC_SOLANA_MAINNET_RPC in .env.local with a custom RPC endpoint from Helius, QuickNode, or Alchemy.
+                  </p>
+                </div>
+              )}
             </div>
           ) : (
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">

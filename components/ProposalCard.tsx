@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import type { Proposal, ProposalAnalysis } from "@/types/dao";
 import type { AIAgent } from "@/types/dao";
 import { formatAddress, getTimeRemaining, getStatusColor } from "@/lib/utils";
+import { useWalletContext } from "./WalletProvider";
 import { 
   ExternalLink, 
   CheckCircle, 
@@ -17,17 +18,9 @@ import {
   ChevronUp,
   AlertCircle,
   Clock,
-  Wallet
+  Wallet as WalletIcon
 } from "lucide-react";
 import { Transaction, VersionedTransaction } from "@solana/web3.js";
-
-// Window wallet types
-interface WindowWallet {
-  publicKey: { toString: () => string } | null;
-  isConnected: boolean;
-  signAndSendTransaction: (transaction: Transaction | VersionedTransaction) => Promise<{ signature: string }>;
-  signTransaction?: (transaction: Transaction) => Promise<Transaction>;
-}
 
 export function ProposalCard({
   proposal,
@@ -48,8 +41,9 @@ export function ProposalCard({
   daoNetwork?: "mainnet" | "devnet";
   governingTokenMint?: string;
 }) {
-  const [windowWallet, setWindowWallet] = useState<WindowWallet | null>(null);
-  const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  // Use shared wallet context
+  const { publicKey, isConnected, signAndSendTransaction } = useWalletContext();
+  const walletAddress = publicKey?.toString() || null;
   
   const [internalAnalysis, setInternalAnalysis] = useState<ProposalAnalysis | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -58,46 +52,6 @@ export function ProposalCard({
   const [voteError, setVoteError] = useState<string | null>(null);
   const [showFullReasoning, setShowFullReasoning] = useState(false);
   const [showOverrideOptions, setShowOverrideOptions] = useState(false);
-
-  // Detect connected wallet from window object
-  useEffect(() => {
-    const checkWallet = () => {
-      if (typeof window === "undefined") return;
-      
-      // Check Phantom
-      const phantom = (window as any).solana;
-      if (phantom?.isPhantom && phantom?.isConnected && phantom?.publicKey) {
-        setWindowWallet(phantom);
-        setWalletAddress(phantom.publicKey.toString());
-        return;
-      }
-      
-      // Check Solflare
-      const solflare = (window as any).solflare;
-      if (solflare?.isSolflare && solflare?.isConnected && solflare?.publicKey) {
-        setWindowWallet(solflare);
-        setWalletAddress(solflare.publicKey.toString());
-        return;
-      }
-      
-      // Check Backpack
-      const backpack = (window as any).backpack;
-      if (backpack?.isBackpack && backpack?.isConnected && backpack?.publicKey) {
-        setWindowWallet(backpack);
-        setWalletAddress(backpack.publicKey.toString());
-        return;
-      }
-      
-      setWindowWallet(null);
-      setWalletAddress(null);
-    };
-    
-    checkWallet();
-    
-    // Re-check periodically in case wallet connects/disconnects
-    const interval = setInterval(checkWallet, 1000);
-    return () => clearInterval(interval);
-  }, []);
 
   // Use external analysis if provided, otherwise use internal state
   const analysis = externalAnalysis || internalAnalysis;
@@ -122,8 +76,8 @@ export function ProposalCard({
   };
 
   const handleVote = async (vote: "yes" | "no" | "abstain") => {
-    if (!windowWallet || !walletAddress || !daoAddress) {
-      alert("Please connect your wallet to vote. Make sure Phantom, Solflare, or Backpack is connected.");
+    if (!isConnected || !walletAddress || !daoAddress) {
+      alert("Please connect your wallet to vote. Click the 'Connect Wallet' button in the header.");
       return;
     }
 
@@ -164,10 +118,8 @@ export function ProposalCard({
       // Deserialize the transaction
       const transaction = Transaction.from(transactionBuffer);
 
-      // Sign and send using the window wallet
-      const result = await windowWallet.signAndSendTransaction(transaction);
-      
-      const signature = result.signature;
+      // Sign and send using the shared wallet context
+      const signature = await signAndSendTransaction(transaction);
 
       setVoteSuccess(`Vote submitted! Tx: ${signature.slice(0, 8)}...`);
       
@@ -205,7 +157,21 @@ export function ProposalCard({
   };
 
   const isVotingActive = proposal.status === "voting";
-  const isWalletConnected = !!windowWallet && !!walletAddress;
+  const isWalletConnected = isConnected && !!walletAddress;
+
+  // Format large numbers (e.g., 11590000 -> "11.59M")
+  const formatVoteCount = (count: number): string => {
+    if (count >= 1_000_000_000) {
+      return (count / 1_000_000_000).toFixed(2).replace(/\.?0+$/, '') + 'B';
+    }
+    if (count >= 1_000_000) {
+      return (count / 1_000_000).toFixed(2).replace(/\.?0+$/, '') + 'M';
+    }
+    if (count >= 1_000) {
+      return (count / 1_000).toFixed(2).replace(/\.?0+$/, '') + 'K';
+    }
+    return count.toLocaleString();
+  };
 
   return (
     <div className="p-5 border border-slate-700 rounded-xl bg-slate-800/50 hover:border-slate-600 transition-all">
@@ -218,7 +184,9 @@ export function ProposalCard({
       </div>
 
       {/* Description */}
-      <p className="text-slate-400 text-sm mb-4 line-clamp-2">{proposal.description}</p>
+      {proposal.description && (
+        <p className="text-slate-400 text-sm mb-4 line-clamp-3">{proposal.description}</p>
+      )}
 
       {/* Stats Grid */}
       <div className="grid grid-cols-2 gap-3 mb-4">
@@ -227,14 +195,18 @@ export function ProposalCard({
             <span className="text-xs text-slate-500">Yes Votes</span>
             <ThumbsUp className="w-3.5 h-3.5 text-green-400" />
           </div>
-          <span className="text-lg font-bold text-green-400">{proposal.votesYes.toLocaleString()}</span>
+          <span className="text-lg font-bold text-green-400" title={proposal.votesYes.toLocaleString()}>
+            {formatVoteCount(proposal.votesYes)}
+          </span>
         </div>
         <div className="p-3 bg-slate-900/50 rounded-lg">
           <div className="flex items-center justify-between">
             <span className="text-xs text-slate-500">No Votes</span>
             <ThumbsDown className="w-3.5 h-3.5 text-red-400" />
           </div>
-          <span className="text-lg font-bold text-red-400">{proposal.votesNo.toLocaleString()}</span>
+          <span className="text-lg font-bold text-red-400" title={proposal.votesNo.toLocaleString()}>
+            {formatVoteCount(proposal.votesNo)}
+          </span>
         </div>
       </div>
 
@@ -258,7 +230,7 @@ export function ProposalCard({
         </a>
         {daoAddress && (
           <a
-            href={`https://v2.realms.today/dao/${daoAddress}/proposal/${proposal.id}`}
+            href={`https://v2.realms.today/dao/${daoAddress}/proposal/${proposal.id}${daoNetwork === "devnet" ? "?cluster=devnet" : ""}`}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-1 text-purple-400 hover:text-purple-300 transition-colors"
@@ -338,9 +310,16 @@ export function ProposalCard({
 
       {/* Wallet Status */}
       {!isWalletConnected && isVotingActive && (
-        <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg flex items-center gap-2">
-          <Wallet className="w-5 h-5 text-amber-400" />
-          <p className="text-sm text-amber-400">Connect your wallet to vote on this proposal</p>
+        <div className="mb-4 p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-amber-500/20 flex items-center justify-center">
+              <WalletIcon className="w-5 h-5 text-amber-400" />
+            </div>
+            <div>
+              <p className="font-medium text-amber-400">Wallet Required</p>
+              <p className="text-sm text-amber-300/80">Connect your wallet using the button in the header to vote on this proposal</p>
+            </div>
+          </div>
         </div>
       )}
 

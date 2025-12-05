@@ -130,9 +130,20 @@ export function ProposalList({
       <div className="p-8 bg-slate-800/50 border border-slate-700 rounded-lg text-center">
         <FileText className="w-10 h-10 text-slate-500 mx-auto mb-3" />
         <p className="text-slate-400 font-medium">No proposals found</p>
-        <p className="text-slate-500 text-sm mt-1">
-          This DAO does not have any proposals yet
+        <p className="text-slate-500 text-sm mt-2 max-w-md mx-auto">
+          This could mean the DAO has no proposals, or we couldn&apos;t fetch them due to RPC limits.
         </p>
+        <a
+          href={`https://v2.realms.today/dao/${daoAddress}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 mt-4 px-4 py-2 bg-purple-600/20 text-purple-400 rounded-lg hover:bg-purple-600/30 transition-colors text-sm"
+        >
+          View on Realms
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+          </svg>
+        </a>
       </div>
     );
   }

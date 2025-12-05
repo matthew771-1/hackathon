@@ -17,6 +17,19 @@ import type { DAO, Proposal as ProposalType } from "@/types/dao";
 const proposalCache = new Map<string, { proposals: ProposalType[]; timestamp: number }>();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
+/**
+ * Clear proposal cache (useful when code changes to re-fetch with new logic)
+ */
+export function clearProposalCache(realmAddress?: string) {
+  if (realmAddress) {
+    proposalCache.delete(realmAddress);
+    console.log(`Cleared proposal cache for ${realmAddress}`);
+  } else {
+    proposalCache.clear();
+    console.log("Cleared all proposal cache");
+  }
+}
+
 // Track in-flight requests to prevent duplicate fetches
 const inFlightRequests = new Map<string, Promise<ProposalType[]>>();
 
@@ -167,9 +180,14 @@ export async function fetchDAOInfo(realmAddress: string): Promise<DAO> {
             // Convert to a readable number (assuming 6-9 decimals)
             const decimals = account.mint ? 9 : 6; // Default to 9 for SOL-like tokens
             treasury = Number(account.amount) / Math.pow(10, decimals);
-          } catch (error) {
-            // ATA might not exist or might not be the treasury
-            console.debug("Could not fetch treasury from ATA:", error);
+          } catch (error: any) {
+            // Handle 403 RPC rate limit errors
+            if (error?.message?.includes("403") || error?.code === 403 || error?.error?.code === 403) {
+              console.error("⚠️ RPC rate limit (403) when fetching treasury. Please set NEXT_PUBLIC_SOLANA_MAINNET_RPC in .env.local");
+            } else {
+              // ATA might not exist or might not be the treasury
+              console.debug("Could not fetch treasury from ATA:", error);
+            }
           }
         }
       }
@@ -179,6 +197,20 @@ export async function fetchDAOInfo(realmAddress: string): Promise<DAO> {
     }
 
     const dynamicDAO = dynamicDAOs.get(realmAddress);
+    
+    // Get the governing token mint from realm data (communityMint) or config
+    let governingTokenMint = (popularDAO as any)?.tokenMint;
+    if (!governingTokenMint && realmData) {
+      // Extract community mint from realm account - this is the governing token
+      const communityMint = (realmData as any).communityMint;
+      if (communityMint) {
+        governingTokenMint = communityMint instanceof PublicKey 
+          ? communityMint.toBase58() 
+          : communityMint.toString?.() || communityMint;
+        console.log(`Discovered governing token mint for ${realmAddress}: ${governingTokenMint}`);
+      }
+    }
+    
     return {
       name: realmName || popularDAO?.name || "Unknown DAO",
       address: realmAddress,
@@ -189,7 +221,7 @@ export async function fetchDAOInfo(realmAddress: string): Promise<DAO> {
       description: popularDAO?.description || realmName || "A Solana DAO using SPL Governance",
       website: popularDAO?.website,
       token: popularDAO?.token,
-      tokenMint: (popularDAO as any)?.tokenMint,
+      tokenMint: governingTokenMint,
       network,
       image: (popularDAO as any)?.image,
       governanceAddresses: (popularDAO as any)?.governanceAddresses || dynamicDAO?.governanceAddresses,
@@ -300,49 +332,102 @@ export async function fetchProposals(realmAddress: string): Promise<ProposalType
         console.log(`Using dynamic governance addresses for ${realmAddress}:`, dynamicGovernanceAddresses);
         effectiveGovernancePubkeys = dynamicGovernanceAddresses.map(addr => new PublicKey(addr));
       } else {
-        // Automatically fetch governance accounts from the realm
+        // Automatically fetch governance accounts from the realm using efficient filtering
         console.log(`No governance addresses configured. Fetching governance accounts for realm ${realmAddress}...`);
         try {
-          // Fetch all Governance accounts that belong to this realm
-          // Governance accounts have a 'realm' field that links them to the realm
-          const governanceAccounts = await getGovernanceAccounts(
-            connection,
+          // Use getProgramAccounts with memcmp filter to efficiently find governance accounts for this realm
+          // Governance accounts have the realm pubkey at byte offset 1 (after the account type discriminator)
+          const governanceAccountsRaw = await connection.getProgramAccounts(
             governanceProgramId,
-            Governance
+            {
+              filters: [
+                // Filter by account type: GovernanceAccountType.GovernanceV2 = 2, GovernanceV1 = 1
+                // Byte 0 is the account type
+                { memcmp: { offset: 0, bytes: "3" } }, // GovernanceAccountType enum value for GovernanceV2
+              ],
+              dataSlice: { offset: 0, length: 0 }, // We just need the pubkeys for now
+            }
           );
           
-          // Filter governance accounts by realm
-          const realmPubkeyStr = realmPubkey.toBase58();
-          const realmGovernanceAccounts = governanceAccounts.filter((govAccount) => {
-            try {
-              const governance = govAccount.account as Governance;
-              const govRealm = (governance as any).realm;
-              if (!govRealm) return false;
-              
-              const govRealmPubkey = govRealm instanceof PublicKey 
-                ? govRealm 
-                : typeof govRealm === 'string'
-                ? new PublicKey(govRealm)
-                : new PublicKey(govRealm.toBase58?.() || govRealm.toString());
-              
-              return govRealmPubkey.toBase58() === realmPubkeyStr;
-            } catch {
-              return false;
-            }
-          });
-          
-          if (realmGovernanceAccounts.length === 0) {
-            console.warn(`⚠️ No governance accounts found for realm ${realmAddress}`);
-            return [];
+          // If V2 filter didn't work, try V1
+          let accounts = governanceAccountsRaw;
+          if (accounts.length === 0) {
+            console.log("No V2 governance accounts, trying V1...");
+            accounts = await connection.getProgramAccounts(
+              governanceProgramId,
+              {
+                filters: [
+                  { memcmp: { offset: 0, bytes: "2" } }, // GovernanceV1
+                ],
+                dataSlice: { offset: 0, length: 0 },
+              }
+            );
           }
           
-          // Extract governance pubkeys
-          effectiveGovernancePubkeys = realmGovernanceAccounts.map(govAccount => govAccount.pubkey);
-          console.log(`✅ Found ${effectiveGovernancePubkeys.length} governance accounts for realm ${realmAddress}:`, 
-            effectiveGovernancePubkeys.map(gp => gp.toBase58()));
-        } catch (error) {
-          console.error(`❌ Error fetching governance accounts for realm ${realmAddress}:`, error);
-          return [];
+          // If still no results, try without type filter but with realm filter
+          if (accounts.length === 0) {
+            console.log("Trying realm-filtered approach...");
+            // Realm pubkey is at offset 1 in governance accounts
+            const realmBytes = realmPubkey.toBase58();
+            accounts = await connection.getProgramAccounts(
+              governanceProgramId,
+              {
+                filters: [
+                  { memcmp: { offset: 1, bytes: realmBytes } },
+                ],
+              }
+            );
+          }
+
+          if (accounts.length === 0) {
+            // Fallback: Fetch governance accounts using SDK (slower but more reliable)
+            console.log("Using SDK fallback to fetch governance accounts...");
+            const governanceAccounts = await getGovernanceAccounts(
+              connection,
+              governanceProgramId,
+              Governance
+            );
+            
+            // Filter governance accounts by realm
+            const realmPubkeyStr = realmPubkey.toBase58();
+            const realmGovernanceAccounts = governanceAccounts.filter((govAccount) => {
+              try {
+                const governance = govAccount.account as Governance;
+                const govRealm = (governance as any).realm;
+                if (!govRealm) return false;
+                
+                const govRealmPubkey = govRealm instanceof PublicKey 
+                  ? govRealm 
+                  : typeof govRealm === 'string'
+                  ? new PublicKey(govRealm)
+                  : new PublicKey(govRealm.toBase58?.() || govRealm.toString());
+                
+                return govRealmPubkey.toBase58() === realmPubkeyStr;
+              } catch {
+                return false;
+              }
+            });
+            
+            effectiveGovernancePubkeys = realmGovernanceAccounts.map(govAccount => govAccount.pubkey);
+          } else {
+            effectiveGovernancePubkeys = accounts.map(acc => acc.pubkey);
+          }
+          
+          if (effectiveGovernancePubkeys.length === 0) {
+            console.warn(`⚠️ No governance accounts found for realm ${realmAddress}. This DAO may not have any active governances.`);
+            // Don't return empty - try to fetch proposals directly from the realm
+          } else {
+            console.log(`✅ Found ${effectiveGovernancePubkeys.length} governance accounts for realm ${realmAddress}:`, 
+              effectiveGovernancePubkeys.slice(0, 5).map(gp => gp.toBase58()));
+          }
+        } catch (error: any) {
+          // Handle 403 RPC rate limit errors
+          if (error?.message?.includes("403") || error?.code === 403 || error?.error?.code === 403) {
+            console.error(`⚠️ RPC rate limit (403). Please set NEXT_PUBLIC_SOLANA_MAINNET_RPC in .env.local`);
+          } else {
+            console.error(`❌ Error fetching governance accounts for realm ${realmAddress}:`, error);
+          }
+          // Continue anyway - we'll try to fetch proposals directly
         }
       }
       
@@ -457,23 +542,24 @@ export async function fetchProposals(realmAddress: string): Promise<ProposalType
 
       console.log(`Fetched ${allProposalsUnfiltered.length} total proposals from blockchain`);
 
+      // Create a set of governance addresses for fast lookup
+      const governancePubkeySet = new Set(effectiveGovernancePubkeys.map(gp => gp.toBase58()));
+
       for (const proposalAccount of allProposalsUnfiltered) {
         try {
           const proposal = proposalAccount.account as Proposal;
           
-          // If we already filtered by governance, all proposals here belong to the realm
+          // If we have governance addresses and already filtered, all proposals belong to the realm
           // Otherwise, check if this proposal belongs to one of our realm's governance accounts
-          let belongsToRealm = true; // Default to true if we pre-filtered
+          let belongsToRealm = effectiveGovernancePubkeys.length > 0;
           
-          if (effectiveGovernancePubkeys.length === 0 || !configuredGovernanceAddresses) {
-            // Only check if we didn't pre-filter
+          if (!belongsToRealm) {
+            // Try to verify the proposal belongs to this realm by checking its governance
             const proposalGov = (proposal as any).governance;
             if (!proposalGov) {
-              console.debug(`Proposal ${proposalAccount.pubkey.toBase58()} has no governance field`);
               continue;
             }
 
-            belongsToRealm = false;
             try {
               const govPubkey = typeof proposalGov === 'string' 
                 ? new PublicKey(proposalGov) 
@@ -481,32 +567,13 @@ export async function fetchProposals(realmAddress: string): Promise<ProposalType
                 ? proposalGov 
                 : new PublicKey(proposalGov.toBase58?.() || proposalGov.toString());
               
-              // Check if governance is in our list
-              belongsToRealm = effectiveGovernancePubkeys.some(gp => gp.equals(govPubkey));
-              
-              if (!belongsToRealm) {
-                // Fallback: try to check governance accounts
-                const governanceAccounts = await getGovernanceAccounts(
-                  connection,
-                  governanceProgramId,
-                  Governance
-                );
-                const govAccount = governanceAccounts.find(g => g.pubkey.equals(govPubkey));
-                if (govAccount) {
-                  const gov = govAccount.account as any;
-                  belongsToRealm = gov.realm?.equals?.(realmPubkey) || 
-                                  gov.realmPubkey?.equals?.(realmPubkey) ||
-                                  (gov.realm && new PublicKey(gov.realm).equals(realmPubkey)) ||
-                                  false;
-                }
-              }
+              // Check if governance is in our list (if we have one)
+              belongsToRealm = governancePubkeySet.size > 0 && governancePubkeySet.has(govPubkey.toBase58());
             } catch (error) {
-              console.debug(`Error checking governance for proposal ${proposalAccount.pubkey}:`, error);
-              belongsToRealm = false; // Skip if we can't verify
+              continue; // Skip if we can't verify
             }
 
             if (!belongsToRealm) {
-              console.debug(`Proposal ${proposalAccount.pubkey.toBase58()} does not belong to realm ${realmAddress}`);
               continue;
             }
           }
@@ -514,69 +581,153 @@ export async function fetchProposals(realmAddress: string): Promise<ProposalType
           // Extract title and description from proposal metadata
           const proposalPubkey = proposalAccount.pubkey.toBase58();
           const title = (proposal as any).name || `Proposal ${proposalPubkey.slice(0, 8)}`;
-          const description = (proposal as any).descriptionLink 
-            ? `View full proposal: ${(proposal as any).descriptionLink}`
-            : "Proposal details available on Realms";
+          
+          // Parse the description link - it could be a hash, a full URL, or plain text
+          let descriptionLink = (proposal as any).descriptionLink || "";
+          let description = "";
+          
+          if (descriptionLink) {
+            descriptionLink = descriptionLink.trim();
+            
+            // Check if descriptionLink is already plain text (not a URL or hash)
+            const isUrl = descriptionLink.startsWith("http://") || descriptionLink.startsWith("https://");
+            const isHash = descriptionLink.length > 20 && /^[a-zA-Z0-9_-]+$/.test(descriptionLink);
+            
+            if (!isUrl && !isHash) {
+              // It's already plain text - use it directly
+              description = descriptionLink;
+            } else {
+              // Build the metadata URL
+              let metadataUrl = "";
+              if (isUrl) {
+                // Clean up double gateway URLs
+                metadataUrl = descriptionLink
+                  .replace(/https?:\/\/gateway\.irys\.xyz\/https?:\/\/gateway\.irys\.xyz\//g, 'https://gateway.irys.xyz/')
+                  .replace(/https?:\/\/arweave\.net\/https?:\/\/arweave\.net\//g, 'https://arweave.net/');
+              } else if (isHash) {
+                // It's an Irys/Arweave hash
+                metadataUrl = `https://gateway.irys.xyz/${descriptionLink}`;
+              }
+              
+              // Try to fetch the actual description via our API (to avoid CORS)
+              if (metadataUrl && typeof window !== 'undefined') {
+                try {
+                  const apiUrl = `/api/proposal-metadata?url=${encodeURIComponent(metadataUrl)}`;
+                  console.log(`Fetching metadata for proposal from: ${metadataUrl}`);
+                  const metadataResponse = await fetch(apiUrl, { 
+                    signal: AbortSignal.timeout(8000)
+                  });
+                  if (metadataResponse.ok) {
+                    const metadata = await metadataResponse.json();
+                    console.log(`Metadata response:`, { 
+                      hasDescription: !!metadata.description, 
+                      descLength: metadata.description?.length,
+                      title: metadata.title 
+                    });
+                    if (metadata.description && metadata.description.trim()) {
+                      description = metadata.description.trim();
+                      // Truncate very long descriptions
+                      if (description.length > 500) {
+                        description = description.substring(0, 500) + "...";
+                      }
+                    }
+                  } else {
+                    console.debug(`Metadata API returned ${metadataResponse.status}`);
+                  }
+                } catch (fetchError) {
+                  console.debug(`Could not fetch metadata for proposal:`, fetchError);
+                }
+              }
+            }
+          }
+          
+          // Default description if nothing found
+          if (!description || description.trim() === "") {
+            description = "No description available. View full details on Realms.";
+          }
 
-          // Calculate vote counts - access properties directly from Proposal object
+          // Calculate vote counts - SPL Governance V2 structure
           let yesVotes = 0;
           let noVotes = 0;
           try {
-            // The Proposal object from @solana/spl-governance stores vote counts in different ways
-            // Try multiple property names and methods
-            const voteType = (proposal as any).voteType;
+            // Helper to convert BN/BigInt to number safely (BN can exceed Number.MAX_SAFE_INTEGER)
+            const bnToNumber = (value: any): number => {
+              if (value === undefined || value === null) return 0;
+              if (typeof value === 'number') return value;
+              if (typeof value === 'bigint') return Number(value);
+              
+              // For BN objects, use toString() then convert to avoid overflow
+              if (typeof value.toString === 'function') {
+                const str = value.toString();
+                // For very large numbers, parse as BigInt first
+                try {
+                  const bigVal = BigInt(str);
+                  // Most governance tokens have 6-9 decimals
+                  // Divide by 10^9 to get human-readable token count
+                  const tokenDecimals = 9;
+                  const scaled = bigVal / BigInt(Math.pow(10, tokenDecimals));
+                  return Number(scaled);
+                } catch {
+                  const num = Number(str);
+                  return isNaN(num) ? 0 : num;
+                }
+              }
+              
+              if (typeof value.toNumber === 'function') {
+                try {
+                  return value.toNumber();
+                } catch {
+                  // toNumber() can throw if value is too large
+                  return 0;
+                }
+              }
+              
+              return Number(value) || 0;
+            };
             
-            // Try accessing vote counts via different property names
-            let yesCount = (proposal as any).yesVotesCount || 
-                          (proposal as any).yesVoteCount ||
-                          (proposal as any).yesVotes ||
-                          (proposal as any).getYesVoteCount?.();
+            // SPL Governance V2 stores votes in:
+            // - options[0].voteWeight for "Yes" votes (approve)
+            // - denyVoteWeight for "No" votes
+            const options = (proposal as any).options;
+            const denyVoteWeight = (proposal as any).denyVoteWeight;
             
-            let noCount = (proposal as any).noVotesCount || 
-                         (proposal as any).noVoteCount ||
-                         (proposal as any).noVotes ||
-                         (proposal as any).getNoVoteCount?.();
-            
-            // Handle BN (BigNumber) objects or numbers
-            if (yesCount !== undefined && yesCount !== null) {
-              if (typeof yesCount.toNumber === 'function') {
-                yesVotes = yesCount.toNumber();
-              } else if (typeof yesCount.toString === 'function') {
-                // Try parsing as string if it's a BN
-                const num = Number(yesCount.toString());
-                yesVotes = isNaN(num) ? 0 : num;
-              } else {
-                yesVotes = Number(yesCount) || 0;
+            if (options && Array.isArray(options) && options.length > 0) {
+              // Get the first option's vote weight (typically "Yes/Approve")
+              const firstOption = options[0];
+              if (firstOption && firstOption.voteWeight !== undefined) {
+                yesVotes = bnToNumber(firstOption.voteWeight);
               }
             }
             
-            if (noCount !== undefined && noCount !== null) {
-              if (typeof noCount.toNumber === 'function') {
-                noVotes = noCount.toNumber();
-              } else if (typeof noCount.toString === 'function') {
-                // Try parsing as string if it's a BN
-                const num = Number(noCount.toString());
-                noVotes = isNaN(num) ? 0 : num;
-              } else {
-                noVotes = Number(noCount) || 0;
-              }
+            if (denyVoteWeight !== undefined) {
+              noVotes = bnToNumber(denyVoteWeight);
             }
             
-            // Debug logging for first few proposals to understand the structure
-            // (Only log first 3 to avoid spam)
+            // Fallback: Try legacy property names if options didn't work
+            if (yesVotes === 0 && noVotes === 0) {
+              const legacyYes = (proposal as any).yesVotesCount || 
+                               (proposal as any).yesVoteCount ||
+                               (proposal as any).yesVotes ||
+                               (proposal as any).approveVoteWeight;
+              const legacyNo = (proposal as any).noVotesCount || 
+                              (proposal as any).noVoteCount ||
+                              (proposal as any).noVotes;
+              
+              if (legacyYes !== undefined) yesVotes = bnToNumber(legacyYes);
+              if (legacyNo !== undefined) noVotes = bnToNumber(legacyNo);
+            }
+            
+            // Debug logging for first few proposals
             const proposalIndex = allProposals.length;
             if (proposalIndex < 3) {
               console.log(`Proposal ${proposalPubkey} vote extraction:`, {
-                voteType,
-                yesCount: yesCount?.toString?.() || yesCount,
-                noCount: noCount?.toString?.() || noCount,
+                optionsRaw: options?.map((o: any) => ({ voteWeight: o?.voteWeight?.toString?.() })),
+                denyVoteWeightRaw: denyVoteWeight?.toString?.(),
                 yesVotes,
                 noVotes,
-                proposalKeys: Object.keys(proposal).slice(0, 20),
               });
             }
           } catch (error) {
-            // If accessing vote counts fails, log and continue
             console.debug(`Error extracting vote counts for proposal ${proposalPubkey}:`, error);
             yesVotes = 0;
             noVotes = 0;
@@ -745,9 +896,54 @@ export async function getDAOFromRealms(identifier: string): Promise<DAO | null> 
       return null;
     }
 
-    // Fetch from blockchain (same as AdrenaDAO)
+    // Try to discover governance addresses for this realm
+    console.log(`Discovering governance addresses for realm ${address}...`);
+    const connection = getConnection("mainnet");
+    const realmPubkey = new PublicKey(address);
+    const governanceProgramId = GOVERNANCE_PROGRAM_ID;
+    
+    let governanceAddresses: string[] = [];
+    
+    try {
+      // Use getProgramAccounts with memcmp filter to find governance accounts for this realm
+      // Governance accounts have the realm pubkey at byte offset 1
+      const realmBytes = realmPubkey.toBase58();
+      
+      const governanceAccountsRaw = await connection.getProgramAccounts(
+        governanceProgramId,
+        {
+          filters: [
+            { memcmp: { offset: 1, bytes: realmBytes } },
+          ],
+        }
+      );
+      
+      if (governanceAccountsRaw.length > 0) {
+        governanceAddresses = governanceAccountsRaw.map(acc => acc.pubkey.toBase58());
+        console.log(`✅ Found ${governanceAddresses.length} governance accounts for realm ${address}`);
+      } else {
+        console.log(`No governance accounts found via memcmp, will try SDK fallback during proposal fetch`);
+      }
+    } catch (error: any) {
+      if (error?.message?.includes("403") || error?.code === 403) {
+        console.warn("⚠️ RPC rate limit when discovering governance addresses");
+      } else {
+        console.warn("Could not auto-discover governance addresses:", error?.message || error);
+      }
+    }
+    
+    // Register the DAO with discovered governance addresses
+    if (governanceAddresses.length > 0) {
+      registerDynamicDAO(address, { governanceAddresses, network: "mainnet" });
+    }
+
+    // Fetch from blockchain
     const dao = await fetchDAOInfo(address);
     if (dao && dao.address) {
+      // Include discovered governance addresses
+      if (governanceAddresses.length > 0 && !dao.governanceAddresses) {
+        dao.governanceAddresses = governanceAddresses;
+      }
       return dao;
     }
     return null;
@@ -779,7 +975,18 @@ export async function getRealmFromGovernance(
     console.log(`Fetching governance account ${governanceAddress}...`);
     
     // First, verify the account exists
-    const accountInfo = await connection.getAccountInfo(governancePubkey);
+    let accountInfo;
+    try {
+      accountInfo = await connection.getAccountInfo(governancePubkey);
+    } catch (error: any) {
+      // Handle 403 RPC rate limit errors
+      if (error?.message?.includes("403") || error?.code === 403 || error?.error?.code === 403) {
+        console.error(`⚠️ RPC rate limit (403) when fetching account ${governanceAddress}. Please set NEXT_PUBLIC_SOLANA_MAINNET_RPC in .env.local`);
+        return null;
+      }
+      // Re-throw other errors
+      throw error;
+    }
     
     if (!accountInfo) {
       console.warn(`❌ Governance account ${governanceAddress} not found on-chain`);

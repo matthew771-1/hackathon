@@ -20,8 +20,9 @@ export const APP_CONFIG = {
   solanaDAOs: {
     // SPL Governance Program ID (used by most Solana DAOs)
     governanceProgramId: "GovER5Lthms3bLBqWub97yVrMmEogzX7xNjdXpPPCVZw",
-    // Popular Solana DAOs on Mainnet
+    // Popular Solana DAOs
     popularDAOs: [
+      // Mainnet DAOs
       {
         name: "Adrena DAO",
         address: "GWe1VYTRMujAtGVhSLwSn4YPsXBLe5qfkzNAYAKD44Nk",
@@ -29,15 +30,31 @@ export const APP_CONFIG = {
         network: "mainnet" as const,
         website: "https://v2.realms.today/dao/GWe1VYTRMujAtGVhSLwSn4YPsXBLe5qfkzNAYAKD44Nk",
         token: "ADRENA",
-        tokenMint: "G3T7ZLw2UHLejCQe3LxdUgme7kqRrNq379sLd95iJdEv", // Adrena governance token mint
+        tokenMint: "G3T7ZLw2UHLejCQe3LxdUgme7kqRrNq379sLd95iJdEv",
         image: "/adrena.jpg",
-        // Specific governance addresses for this DAO
         governanceAddresses: [
           "HgeoVqTTMQ9K5GZAUpPKaz5PS8Rn55yR5e5SwmB3DbKB",
           "HbzDAYnhidh35woSLmbqCgvjc52ZUPPQfN1fGDa7CTXx",
         ],
-        // Treasury wallet address
         treasuryAddress: "7VzEXYvGmLg3tdVuFuGFQdr7GP5tutTUt8EcTGHvG8Ev",
+      },
+      // Devnet Test DAOs
+      {
+        name: "Mango DAO (Devnet)",
+        address: "DPiH3H3c7t47BMxqTxLsuPQpEC6Kne8GA9VXbxpnZxFE",
+        description: "Mango Markets governance on devnet - great for testing",
+        network: "devnet" as const,
+        website: "https://v2.realms.today/dao/DPiH3H3c7t47BMxqTxLsuPQpEC6Kne8GA9VXbxpnZxFE?cluster=devnet",
+        token: "MNGO",
+        image: "/mango.png",
+      },
+      {
+        name: "Governance Test DAO (Devnet)",
+        address: "FMEWULPSGR1BKVJK4K7xTjhG23NfYxeAn2bamYgNoJFA",
+        description: "SPL Governance test realm on devnet",
+        network: "devnet" as const,
+        website: "https://v2.realms.today/dao/FMEWULPSGR1BKVJK4K7xTjhG23NfYxeAn2bamYgNoJFA?cluster=devnet",
+        token: "TEST",
       },
     ],
   },

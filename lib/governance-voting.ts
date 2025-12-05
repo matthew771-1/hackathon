@@ -166,10 +166,24 @@ export async function hasUserVoted(
       governanceProgramId
     );
     
-    const accountInfo = await connection.getAccountInfo(voteRecordPDA);
+    let accountInfo;
+    try {
+      accountInfo = await connection.getAccountInfo(voteRecordPDA);
+    } catch (error: any) {
+      // Handle 403 RPC rate limit errors
+      if (error?.message?.includes("403") || error?.code === 403 || error?.error?.code === 403) {
+        console.error("⚠️ RPC rate limit (403) when checking vote status. Please set NEXT_PUBLIC_SOLANA_MAINNET_RPC in .env.local");
+        return false;
+      }
+      // Re-throw other errors to be caught by outer catch
+      throw error;
+    }
     return accountInfo !== null;
-  } catch (error) {
-    console.error("Error checking vote status:", error);
+  } catch (error: any) {
+    // Handle other errors (not 403)
+    if (!error?.message?.includes("403") && error?.code !== 403 && error?.error?.code !== 403) {
+      console.error("Error checking vote status:", error);
+    }
     return false;
   }
 }
