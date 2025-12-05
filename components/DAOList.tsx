@@ -1,14 +1,19 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Image from "next/image";
-import type { DAO } from "@/types/dao";
-import { POPULAR_SOLANA_DAOS, fetchDAOInfo } from "@/lib/realms";
+import type { DAO, AIAgent, Proposal, ScheduledVote, ProposalAnalysis } from "@/types/dao";
+import { POPULAR_SOLANA_DAOS, fetchDAOInfo, fetchProposals } from "@/lib/realms";
 import { DAODetail } from "./DAODetail";
-import { Building2, FileText, ExternalLink, Plus } from "lucide-react";
+import { ScheduledVotesPanel } from "./ScheduledVotesPanel";
+import { ProposalList } from "./ProposalList";
+import { useAgentServiceContext } from "@/contexts/AgentServiceContext";
+import { Building2, FileText, ExternalLink, Plus, ChevronDown, Bot, Zap, RefreshCw, Search, Loader2 } from "lucide-react";
 import { AddDAOModal } from "./AddDAOModal";
 
 const STORAGE_KEY = "dao-ai-agent-custom-daos";
+const DELEGATIONS_KEY = "dao-ai-agent-delegations";
+const SCHEDULED_VOTES_KEY = "dao-ai-agent-scheduled-votes";
 
 // Helper functions for localStorage
 const saveCustomDAOs = (daos: DAO[]) => {
@@ -35,11 +40,26 @@ const loadCustomDAOs = (): DAO[] => {
   return [];
 };
 
-export function DAOList({ agents }: { agents?: any[] }) {
+interface DelegationMap {
+  [daoAddress: string]: string; // maps DAO address to agent ID
+}
+
+export function DAOList({ agents = [] }: { agents?: AIAgent[] }) {
+  const agentService = useAgentServiceContext();
   const [daos, setDaos] = useState<DAO[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDAO, setSelectedDAO] = useState<DAO | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [delegations, setDelegations] = useState<DelegationMap>({});
+  const [scheduledVotes, setScheduledVotes] = useState<ScheduledVote[]>([]);
+  const [proposals, setProposals] = useState<Proposal[]>([]);
+  const [analyses, setAnalyses] = useState<Record<string, ProposalAnalysis>>({});
+  const [autoAnalyzing, setAutoAnalyzing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<DAO[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
 
   useEffect(() => {
     // Load popular Solana DAOs and custom DAOs
@@ -116,6 +136,213 @@ export function DAOList({ agents }: { agents?: any[] }) {
 
     loadDAOs();
   }, []);
+
+  // Load delegations and scheduled votes from storage
+  useEffect(() => {
+    const storedDelegations = localStorage.getItem(DELEGATIONS_KEY);
+    if (storedDelegations) {
+      setDelegations(JSON.parse(storedDelegations));
+    }
+
+    const storedVotes = localStorage.getItem(SCHEDULED_VOTES_KEY);
+    if (storedVotes) {
+      const votes = JSON.parse(storedVotes).map((v: any) => ({
+        ...v,
+        scheduledTime: new Date(v.scheduledTime),
+      }));
+      setScheduledVotes(votes);
+    }
+  }, []);
+
+  // Load proposals when DAO is selected
+  useEffect(() => {
+    if (!selectedDAO) {
+      setProposals([]);
+      return;
+    }
+
+    const loadProposals = async () => {
+      try {
+        const fetched = await fetchProposals(selectedDAO.address);
+        setProposals(fetched);
+      } catch (error) {
+        console.error("Error loading proposals:", error);
+        setProposals([]);
+      }
+    };
+
+    loadProposals();
+  }, [selectedDAO]);
+
+  // Save delegations
+  const saveDelegations = (newDelegations: DelegationMap) => {
+    localStorage.setItem(DELEGATIONS_KEY, JSON.stringify(newDelegations));
+    setDelegations(newDelegations);
+  };
+
+  // Save scheduled votes
+  const saveScheduledVotes = (votes: ScheduledVote[]) => {
+    localStorage.setItem(SCHEDULED_VOTES_KEY, JSON.stringify(votes));
+    setScheduledVotes(votes);
+  };
+
+  // Get delegated agent for selected DAO
+  const getDelegatedAgent = useCallback((): AIAgent | null => {
+    if (!selectedDAO) return null;
+    const agentId = delegations[selectedDAO.address];
+    return agents.find(a => a.id === agentId) || null;
+  }, [selectedDAO, delegations, agents]);
+
+  // Auto-analyze proposals
+  const runAutoAnalysis = useCallback(async () => {
+    const agent = getDelegatedAgent();
+    if (!agent || !selectedDAO || !agentService) return;
+
+    const agentInstance = agentService.getAgent(agent.id);
+    if (!agentInstance) {
+      alert("Please initialize the AI agent first.");
+      return;
+    }
+
+    const activeProposals = proposals.filter(
+      p => (p.status === "voting" || p.status === "draft") && !analyses[p.id]
+    );
+
+    if (activeProposals.length === 0) return;
+
+    setAutoAnalyzing(true);
+
+    for (const proposal of activeProposals) {
+      try {
+        const analysis = await agentService.analyzeProposalWithAgent(
+          agent.id,
+          proposal,
+          agent
+        );
+
+        if (analysis) {
+          const typedAnalysis: ProposalAnalysis = {
+            recommendation: analysis.recommendation,
+            reasoning: analysis.reasoning,
+            confidence: analysis.confidence,
+            keyFactors: analysis.keyFactors || [],
+          };
+          setAnalyses(prev => ({ ...prev, [proposal.id]: typedAnalysis }));
+
+          // Schedule vote if auto-vote enabled
+          if (agent.votingPreferences.autoVote) {
+            const minConfidence = agent.votingPreferences.minVotingThreshold || 70;
+            
+            if (typedAnalysis.confidence >= minConfidence && typedAnalysis.recommendation !== "abstain") {
+              const scheduledTime = new Date();
+              scheduledTime.setMinutes(scheduledTime.getMinutes() + 2);
+
+              const newVote: ScheduledVote = {
+                id: `vote-${Date.now()}-${proposal.id}`,
+                proposalId: proposal.id,
+                proposalTitle: proposal.title,
+                daoAddress: selectedDAO.address,
+                daoName: selectedDAO.name,
+                agentId: agent.id,
+                agentName: agent.name,
+                recommendation: typedAnalysis.recommendation as "yes" | "no",
+                confidence: typedAnalysis.confidence,
+                scheduledTime,
+                status: "pending",
+                reasoning: typedAnalysis.reasoning,
+              };
+
+              const existing = scheduledVotes.find(v => v.proposalId === proposal.id && v.status === "pending");
+              if (!existing) {
+                saveScheduledVotes([...scheduledVotes, newVote]);
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error(`Error analyzing proposal ${proposal.id}:`, error);
+      }
+    }
+
+    setAutoAnalyzing(false);
+  }, [getDelegatedAgent, selectedDAO, agentService, proposals, analyses, scheduledVotes]);
+
+  // Handle agent delegation
+  const handleDelegateAgent = (agentId: string) => {
+    if (!selectedDAO) return;
+    const newDelegations = { ...delegations, [selectedDAO.address]: agentId };
+    saveDelegations(newDelegations);
+  };
+
+  // Handle canceling a scheduled vote
+  const handleCancelVote = (voteId: string) => {
+    const updated = scheduledVotes.map(v =>
+      v.id === voteId ? { ...v, status: "cancelled" as const } : v
+    );
+    saveScheduledVotes(updated);
+  };
+
+  // Handle search
+  const handleSearch = async (query: string) => {
+    const trimmedQuery = query.trim();
+    
+    // Allow searching even for short queries if it looks like an address
+    const isAddress = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(trimmedQuery);
+    const isURL = trimmedQuery.includes("realms.today");
+    
+    if (!isAddress && !isURL && trimmedQuery.length < 3) {
+      setSearchResults([]);
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      // Dynamically import to ensure it's available
+      const { searchRealmsDAOs } = await import("@/lib/realms");
+      const results = await searchRealmsDAOs(trimmedQuery);
+      setSearchResults(results || []);
+    } catch (error: any) {
+      console.error("Error searching DAOs:", error);
+      setSearchResults([]);
+      // Show user-friendly error
+      if (error?.message) {
+        console.error("Search error details:", error.message);
+      }
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  // Handle manual analysis
+  const handleAnalyze = async (proposal: Proposal, agent: AIAgent) => {
+    if (!agentService) return;
+    
+    const agentInstance = agentService.getAgent(agent.id);
+    if (!agentInstance) {
+      alert("Please initialize the AI agent first.");
+      return;
+    }
+
+    try {
+      const analysis = await agentService.analyzeProposalWithAgent(
+        agent.id,
+        proposal,
+        agent
+      );
+
+      if (analysis) {
+        const typedAnalysis: ProposalAnalysis = {
+          recommendation: analysis.recommendation,
+          reasoning: analysis.reasoning,
+          confidence: analysis.confidence,
+          keyFactors: analysis.keyFactors || [],
+        };
+        setAnalyses(prev => ({ ...prev, [proposal.id]: typedAnalysis }));
+      }
+    } catch (error) {
+      console.error("Error analyzing proposal:", error);
+    }
+  };
 
   if (loading) {
     return (
@@ -211,22 +438,318 @@ export function DAOList({ agents }: { agents?: any[] }) {
     }
   };
 
+  const delegatedAgent = getDelegatedAgent();
+  const pendingVotes = scheduledVotes.filter(
+    v => v.status === "pending" && (!selectedDAO || v.daoAddress === selectedDAO.address)
+  );
+
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-          <Building2 className="w-6 h-6" />
-          Available DAOs
-        </h2>
-        <button
-          onClick={() => setIsAddModalOpen(true)}
-          className="px-4 py-2 bg-gradient-to-r from-purple-600 to-fuchsia-600 text-white rounded-lg hover:from-purple-700 hover:to-fuchsia-700 transition-all flex items-center gap-2 shadow-lg shadow-purple-500/20"
-        >
-          <Plus className="w-4 h-4" />
-          Add DAO
-        </button>
+      {/* DAO Dropdown Selector */}
+      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 border border-slate-700 rounded-2xl p-6">
+        <div className="flex flex-col lg:flex-row lg:items-center gap-4">
+          <div className="flex-1">
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-xs font-medium text-slate-400 uppercase tracking-wider">
+                Select Your DAO
+              </label>
+              <button
+                onClick={() => {
+                  setShowSearch(!showSearch);
+                  if (!showSearch) {
+                    setIsDropdownOpen(false);
+                  }
+                }}
+                className="p-2 text-slate-400 hover:text-purple-400 hover:bg-purple-500/10 rounded-lg transition-colors"
+                title="Search DAOs from Realms"
+              >
+                <Search className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="relative">
+              {/* Search Input */}
+              {showSearch && (
+                <div className="mb-2">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                        onChange={(e) => {
+                        setSearchQuery(e.target.value);
+                        const value = e.target.value.trim();
+                        // Search if it looks like an address or URL, or if it's long enough
+                        if (value.length > 0 && (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value) || value.includes("realms.today") || value.length > 10)) {
+                          handleSearch(value);
+                        } else {
+                          setSearchResults([]);
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && searchQuery.trim().length > 0) {
+                          handleSearch(searchQuery.trim());
+                        }
+                      }}
+                      placeholder="Enter Realms DAO address or URL (e.g., GWe1VYTRMujAtGVhSLwSn4YPsXBLe5qfkzNAYAKD44Nk)"
+                      className="w-full pl-10 pr-4 py-2.5 bg-slate-950/50 border border-slate-700 rounded-xl text-white placeholder:text-slate-500 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                    />
+                    {isSearching && (
+                      <Loader2 className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-purple-400 animate-spin" />
+                    )}
+                  </div>
+                  {searchResults.length > 0 && (
+                    <div className="mt-2 max-h-48 overflow-y-auto bg-slate-900 border border-slate-700 rounded-xl shadow-2xl">
+                      {searchResults.map((dao) => (
+                        <button
+                          key={dao.address}
+                          onClick={async () => {
+                            // Fetch full DAO info and add to list
+                            try {
+                              const { getDAOFromRealms } = await import("@/lib/realms");
+                              const fullDAO = await getDAOFromRealms(dao.address);
+                              if (fullDAO) {
+                                // Check if already exists
+                                const exists = daos.find(d => d.address === fullDAO.address);
+                                if (!exists) {
+                                  setDaos(prev => [...prev, fullDAO]);
+                                  // Save to custom DAOs
+                                  const popularAddresses = new Set<string>(POPULAR_SOLANA_DAOS.map(d => d.address));
+                                  const customDAOs = [...daos, fullDAO].filter(d => !popularAddresses.has(d.address));
+                                  localStorage.setItem(STORAGE_KEY, JSON.stringify(customDAOs));
+                                }
+                                setSelectedDAO(fullDAO);
+                                setShowSearch(false);
+                                setSearchQuery("");
+                                setSearchResults([]);
+                              } else {
+                                alert("Failed to fetch DAO information. Please verify the address is correct.");
+                              }
+                            } catch (error: any) {
+                              console.error("Error adding DAO:", error);
+                              alert(`Failed to add DAO: ${error?.message || "Unknown error"}. Please try again.`);
+                            }
+                          }}
+                          className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-800 transition-colors text-left border-b border-slate-700/50 last:border-b-0"
+                        >
+                          {dao.image && (
+                            <div className="w-8 h-8 rounded-lg overflow-hidden bg-slate-800 flex items-center justify-center border border-slate-700">
+                              <Image
+                                src={dao.image}
+                                alt={dao.name}
+                                width={32}
+                                height={32}
+                                className="object-contain"
+                                unoptimized
+                              />
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-white truncate">{dao.name}</div>
+                            {dao.description && (
+                              <div className="text-xs text-slate-400 truncate">{dao.description}</div>
+                            )}
+                            <div className="text-xs text-slate-500 font-mono mt-0.5">{dao.address.slice(0, 8)}...</div>
+                          </div>
+                          <Plus className="w-4 h-4 text-purple-400" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              <button
+                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                className="w-full flex items-center justify-between gap-3 px-4 py-3 bg-slate-950/50 border border-slate-700 rounded-xl text-left hover:border-purple-500/50 transition-all"
+              >
+                {selectedDAO ? (
+                  <div className="flex items-center gap-3">
+                    {selectedDAO.image && (
+                      <div className="w-8 h-8 rounded-lg overflow-hidden bg-slate-800 flex items-center justify-center border border-slate-600">
+                        <Image
+                          src={selectedDAO.image}
+                          alt={selectedDAO.name}
+                          width={32}
+                          height={32}
+                          className="object-contain"
+                          unoptimized
+                        />
+                      </div>
+                    )}
+                    <div>
+                      <span className="font-semibold text-white">{selectedDAO.name}</span>
+                      {selectedDAO.token && (
+                        <span className="ml-2 text-xs px-2 py-0.5 bg-purple-500/20 text-purple-300 rounded-full">
+                          {selectedDAO.token}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <span className="text-slate-400">Choose a DAO...</span>
+                )}
+                <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform ${isDropdownOpen ? "rotate-180" : ""}`} />
+              </button>
+
+              {isDropdownOpen && (
+                <div className="absolute z-50 mt-2 w-full bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden">
+                  <div className="max-h-64 overflow-y-auto">
+                    {daos.map((dao) => (
+                      <button
+                        key={dao.address}
+                        onClick={() => {
+                          setSelectedDAO(dao);
+                          setIsDropdownOpen(false);
+                        }}
+                        className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-800 transition-colors text-left ${
+                          selectedDAO?.address === dao.address ? "bg-purple-500/10 border-l-2 border-purple-500" : ""
+                        }`}
+                      >
+                        {dao.image && (
+                          <div className="w-8 h-8 rounded-lg overflow-hidden bg-slate-800 flex items-center justify-center border border-slate-700">
+                            <Image
+                              src={dao.image}
+                              alt={dao.name}
+                              width={32}
+                              height={32}
+                              className="object-contain"
+                              unoptimized
+                            />
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-white truncate">{dao.name}</div>
+                          {dao.description && (
+                            <div className="text-xs text-slate-400 truncate">{dao.description}</div>
+                          )}
+                        </div>
+                        {delegations[dao.address] && (
+                          <Bot className="w-4 h-4 text-green-400" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => {
+                      setIsDropdownOpen(false);
+                      setIsAddModalOpen(true);
+                    }}
+                    className="w-full flex items-center gap-2 px-4 py-3 border-t border-slate-700 text-purple-400 hover:bg-slate-800 transition-colors"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add New DAO
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Agent Delegation */}
+          {selectedDAO && (
+            <div className="lg:w-80">
+              <label className="block text-xs font-medium text-slate-400 mb-2 uppercase tracking-wider">
+                Delegated AI Agent
+              </label>
+              {agents.length > 0 ? (
+                <div className="flex gap-2">
+                  <select
+                    value={delegatedAgent?.id || ""}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        handleDelegateAgent(e.target.value);
+                      } else {
+                        const newDelegations = { ...delegations };
+                        delete newDelegations[selectedDAO.address];
+                        saveDelegations(newDelegations);
+                      }
+                    }}
+                    className="flex-1 px-4 py-3 bg-slate-950/50 border border-slate-700 rounded-xl text-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all"
+                  >
+                    <option value="" className="bg-slate-900">No agent delegated</option>
+                    {agents.map((agent) => (
+                      <option key={agent.id} value={agent.id} className="bg-slate-900">
+                        {agent.name} ({agent.votingPreferences.riskTolerance})
+                      </option>
+                    ))}
+                  </select>
+                  {delegatedAgent && (
+                    <button
+                      onClick={runAutoAnalysis}
+                      disabled={autoAnalyzing}
+                      className="px-4 py-3 bg-gradient-to-r from-purple-600 to-fuchsia-600 text-white rounded-xl hover:from-purple-700 hover:to-fuchsia-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Run AI analysis on all active proposals"
+                    >
+                      {autoAnalyzing ? (
+                        <RefreshCw className="w-5 h-5 animate-spin" />
+                      ) : (
+                        <Zap className="w-5 h-5" />
+                      )}
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="px-4 py-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-300 text-sm">
+                  Create an agent first in &quot;My Agents&quot; tab
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Delegation Status */}
+        {delegatedAgent && selectedDAO && (
+          <div className="mt-4 p-4 bg-green-500/10 border border-green-500/30 rounded-xl">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
+                <Bot className="w-5 h-5 text-green-400" />
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-green-400">{delegatedAgent.name}</span>
+                  <span className="text-xs px-2 py-0.5 bg-green-500/20 text-green-300 rounded-full">
+                    Active
+                  </span>
+                  {delegatedAgent.votingPreferences.autoVote && (
+                    <span className="text-xs px-2 py-0.5 bg-purple-500/20 text-purple-300 rounded-full flex items-center gap-1">
+                      <Zap className="w-3 h-3" />
+                      Auto-Vote Enabled
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm text-slate-400 mt-0.5">
+                  {delegatedAgent.votingPreferences.riskTolerance} risk • 
+                  Min confidence: {delegatedAgent.votingPreferences.minVotingThreshold || 70}%
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+
+      {/* Scheduled Votes Panel */}
+      {selectedDAO && pendingVotes.length > 0 && (
+        <ScheduledVotesPanel
+          scheduledVotes={pendingVotes}
+          onCancelVote={handleCancelVote}
+        />
+      )}
+
+      {/* Old Grid View - Keep for reference but hide when DAO selected */}
+      {!selectedDAO && (
+        <>
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+              <Building2 className="w-6 h-6" />
+              Available DAOs
+            </h2>
+            <button
+              onClick={() => setIsAddModalOpen(true)}
+              className="px-4 py-2 bg-gradient-to-r from-purple-600 to-fuchsia-600 text-white rounded-lg hover:from-purple-700 hover:to-fuchsia-700 transition-all flex items-center gap-2 shadow-lg shadow-purple-500/20"
+            >
+              <Plus className="w-4 h-4" />
+              Add DAO
+            </button>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {daos.map((dao) => (
           <div
             key={dao.address}
@@ -278,14 +801,27 @@ export function DAOList({ agents }: { agents?: any[] }) {
             </button>
           </div>
         ))}
-      </div>
+          </div>
+        </>
+      )}
 
+      {/* Selected DAO View */}
       {selectedDAO && (
-        <DAODetail
-          dao={selectedDAO}
-          agents={agents || []}
-          onClose={() => setSelectedDAO(null)}
-        />
+        <div className="space-y-6">
+          {/* Proposals List */}
+          <div>
+            <h2 className="text-xl font-bold text-white flex items-center gap-2 mb-4">
+              <FileText className="w-5 h-5 text-purple-400" />
+              Active Proposals
+            </h2>
+            <ProposalList
+              daoAddress={selectedDAO.address}
+              daoNetwork={selectedDAO.network}
+              governingTokenMint={selectedDAO.tokenMint}
+              agent={delegatedAgent || undefined}
+            />
+          </div>
+        </div>
       )}
 
       <AddDAOModal

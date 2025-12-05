@@ -72,13 +72,38 @@ export const REALMS_PROGRAM_ID = GOVERNANCE_PROGRAM_ID;
  */
 export async function fetchDAOInfo(realmAddress: string): Promise<DAO> {
   try {
+    // Validate address format first
+    if (!realmAddress || typeof realmAddress !== "string") {
+      throw new Error("Invalid realm address: address must be a non-empty string");
+    }
+
+    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(realmAddress)) {
+      throw new Error(`Invalid Solana address format: ${realmAddress}`);
+    }
+
     const popularDAO = APP_CONFIG.solanaDAOs.popularDAOs.find(
       (dao) => dao.address === realmAddress
     );
     const network = popularDAO?.network || "mainnet";
-    const connection = getConnection(network);
+    
+    let connection;
+    try {
+      connection = getConnection(network);
+      if (!connection) {
+        throw new Error("Failed to create Solana connection");
+      }
+    } catch (connError: any) {
+      console.error("Error creating connection:", connError);
+      throw new Error(`Failed to connect to Solana ${network}: ${connError?.message || "Unknown error"}`);
+    }
 
-    const realmPubkey = new PublicKey(realmAddress);
+    let realmPubkey;
+    try {
+      realmPubkey = new PublicKey(realmAddress);
+    } catch (pkError: any) {
+      console.error("Error creating PublicKey:", pkError);
+      throw new Error(`Invalid public key format: ${pkError?.message || "Unknown error"}`);
+    }
     const governanceProgramId = GOVERNANCE_PROGRAM_ID;
 
     // Fetch realm data
@@ -637,6 +662,92 @@ export async function fetchProposals(realmAddress: string): Promise<ProposalType
   inFlightRequests.set(realmAddress, fetchPromise);
 
   return fetchPromise;
+}
+
+/**
+ * Search for DAOs on Realms
+ * Supports searching by realm address or fetching by address
+ */
+export async function searchRealmsDAOs(query: string): Promise<DAO[]> {
+  const trimmedQuery = query.trim();
+  
+  // Validate we're in a browser environment
+  if (typeof window === "undefined") {
+    console.warn("searchRealmsDAOs can only be called in browser environment");
+    return [];
+  }
+  
+  // If query looks like a Solana address, try to fetch it directly
+  if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(trimmedQuery)) {
+    try {
+      const dao = await fetchDAOInfo(trimmedQuery);
+      if (dao && dao.address) {
+        return [dao];
+      }
+      return [];
+    } catch (error: any) {
+      console.error("Error fetching DAO by address:", error);
+      // Return empty array instead of throwing
+      return [];
+    }
+  }
+
+  // Try to extract address from Realms URL
+  const urlMatch = trimmedQuery.match(/realms\.today\/dao\/([A-Za-z0-9]{32,44})/);
+  if (urlMatch && urlMatch[1]) {
+    try {
+      const dao = await fetchDAOInfo(urlMatch[1]);
+      if (dao && dao.address) {
+        return [dao];
+      }
+      return [];
+    } catch (error: any) {
+      console.error("Error fetching DAO from URL:", error);
+      return [];
+    }
+  }
+
+  // For text search, we can't easily search Realms without an API
+  // So we'll return empty and let users search by address
+  // In the future, we could maintain a local index or use a different approach
+  return [];
+}
+
+/**
+ * Get DAO from Realms by address or URL
+ */
+export async function getDAOFromRealms(identifier: string): Promise<DAO | null> {
+  try {
+    // Validate we're in a browser environment
+    if (typeof window === "undefined") {
+      console.warn("getDAOFromRealms can only be called in browser environment");
+      return null;
+    }
+
+    // Extract address from URL if provided
+    let address = identifier;
+    const urlMatch = identifier.match(/realms\.today\/dao\/([A-Za-z0-9]{32,44})/);
+    if (urlMatch && urlMatch[1]) {
+      address = urlMatch[1];
+    }
+
+    // Validate it's a Solana address
+    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) {
+      console.error("Invalid Solana address format:", address);
+      return null;
+    }
+
+    // Fetch from blockchain (same as AdrenaDAO)
+    const dao = await fetchDAOInfo(address);
+    if (dao && dao.address) {
+      return dao;
+    }
+    return null;
+  } catch (error: any) {
+    console.error("Error getting DAO from Realms:", error);
+    // Return null instead of throwing to prevent breaking the UI
+    return null;
+  }
 }
 
 /**

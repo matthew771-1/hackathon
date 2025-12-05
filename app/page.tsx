@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { WalletProvider } from "@/components/WalletProvider";
 import { WalletButton } from "@/components/WalletButton";
 import { DAOList } from "@/components/DAOList";
@@ -11,18 +11,39 @@ import { AgentServiceProvider } from "@/contexts/AgentServiceContext";
 import type { AIAgent } from "@/types/dao";
 import { Settings as SettingsIcon, Bot, Sparkles } from "lucide-react";
 
+const AGENTS_STORAGE_KEY = "dao-ai-agent-agents";
+
 export default function Home() {
   const [agents, setAgents] = useState<AIAgent[]>([]);
-  const [activeTab, setActiveTab] = useState<"agents" | "daos">("agents");
+  const [activeTab, setActiveTab] = useState<"agents" | "daos">("daos");
   const [showSettings, setShowSettings] = useState(false);
 
+  // Load agents from localStorage
+  useEffect(() => {
+    const stored = localStorage.getItem(AGENTS_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored).map((a: any) => ({
+        ...a,
+        createdAt: new Date(a.createdAt),
+      }));
+      setAgents(parsed);
+    }
+  }, []);
+
+  // Save agents to localStorage
+  const saveAgents = (newAgents: AIAgent[]) => {
+    localStorage.setItem(AGENTS_STORAGE_KEY, JSON.stringify(newAgents));
+    setAgents(newAgents);
+  };
+
   const handleAgentCreated = (agent: AIAgent) => {
-    setAgents([...agents, agent]);
-    setActiveTab("agents");
+    const newAgents = [...agents, agent];
+    saveAgents(newAgents);
   };
 
   const handleAgentUpdate = (updatedAgent: AIAgent) => {
-    setAgents(agents.map((a) => (a.id === updatedAgent.id ? updatedAgent : a)));
+    const newAgents = agents.map((a) => (a.id === updatedAgent.id ? updatedAgent : a));
+    saveAgents(newAgents);
   };
 
   return (
@@ -69,7 +90,7 @@ export default function Home() {
               Delegate Your Governance Power
             </h2>
             <p className="text-sm md:text-base text-slate-400 max-w-xl mx-auto">
-              Create AI agents that analyze proposals and vote on your behalf. Stay involved in DAO governance without the time commitment.
+              Create AI agents that analyze Solana DAO proposals and vote on your behalf. Built for the Solana blockchain - stay involved in on-chain governance without the time commitment.
             </p>
           </div>
 
@@ -93,7 +114,7 @@ export default function Home() {
                   : "text-slate-400 hover:text-slate-300 hover:bg-slate-900/50"
               }`}
             >
-              Browse DAOs
+              DAOscan
             </button>
           </div>
 

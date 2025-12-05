@@ -51,3 +51,18 @@ export interface ProposalAnalysis {
   keyFactors: string[];
 }
 
+export interface ScheduledVote {
+  id: string;
+  proposalId: string;
+  proposalTitle: string;
+  daoAddress: string;
+  daoName?: string;
+  agentId: string;
+  agentName?: string;
+  recommendation: "yes" | "no";
+  confidence: number;
+  scheduledTime: Date;
+  status: "pending" | "executed" | "cancelled";
+  reasoning?: string;
+}
+
